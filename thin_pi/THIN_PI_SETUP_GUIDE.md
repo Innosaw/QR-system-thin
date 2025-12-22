@@ -56,7 +56,7 @@ This guide covers:
 ## 3) First boot: power up + find the Pi on the network
 
 1. Insert the microSD into the Pi.
-2. Plug in **Ethernet** (recommended) and power on.
+2. Plug in **Ethernet** (recommended for first-time setup) and power on.
 3. Find the Pi’s IP address:
    - From your router/DHCP client list, or
    - If mDNS works on your network: try `ping <hostname>.local`
@@ -110,6 +110,42 @@ sudo bash install_thin_pi.sh
 ```
 
 This installs to: `~/qr-system` and starts the service: `innosaw-thin`
+
+---
+
+## 4.6) Wi‑Fi setup (optional)
+
+Recommended: do first-time setup on **Ethernet**, then switch to Wi‑Fi only if needed.
+
+### Option A (easiest): set Wi‑Fi in Raspberry Pi Imager
+
+When flashing Raspberry Pi OS, use **OS customisation** to enter Wi‑Fi SSID/password.
+
+### Option B: HDMI + keyboard on the Pi
+
+Run:
+
+```bash
+sudo nmtui
+```
+
+Then join the shop Wi‑Fi.
+
+Suggested walkthrough (screenshots can be added later):
+- Select **Activate a connection**
+- Pick the Wi‑Fi network (SSID) → Enter
+- Enter password → Enter
+- Back → Quit
+
+### Option C: Windows PowerShell (copy/paste)
+
+If SSH is enabled and you know the Pi’s IP:
+
+```bash
+ssh pi@<pi-ip> "sudo nmcli dev wifi connect '<ssid>' password '<wifi-password>'"
+```
+
+If this fails, fall back to Option B.
 
 ---
 

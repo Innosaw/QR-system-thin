@@ -78,6 +78,40 @@
 sudo bash install_thin_pi.sh</pre>
     </div>
 
+    <div class="card" id="wifi">
+      <div class="h2">Wi‑Fi setup (if you shipped Ethernet-first)</div>
+      <div class="muted">
+        Recommended: do first-time setup on <strong>Ethernet</strong>, then switch to Wi‑Fi only if needed.
+        If you need Wi‑Fi, here are the simplest options (pick one).
+      </div>
+      <ol style="margin-top:10px;">
+        <li>
+          <strong>Easiest (no terminal):</strong> re-flash using Raspberry Pi Imager and enter Wi‑Fi in <strong>OS customisation</strong>.
+        </li>
+        <li style="margin-top:8px;">
+          <strong>HDMI method:</strong> plug in a monitor + keyboard and run:
+          <pre class="mono" style="margin-top:8px; white-space:pre-wrap;">sudo nmtui</pre>
+          <div class="muted">This opens a simple text UI to join Wi‑Fi.</div>
+          <div class="muted" style="margin-top:8px;"><strong>nmtui steps</strong> (screenshots can be added later):</div>
+          <ol style="margin-top:6px;">
+            <li>Select <strong>Activate a connection</strong></li>
+            <li>Select your Wi‑Fi network (SSID) → press <strong>Enter</strong></li>
+            <li>Enter the Wi‑Fi password → press <strong>Enter</strong></li>
+            <li>If asked, confirm/OK → then choose <strong>Back</strong> → <strong>Quit</strong></li>
+          </ol>
+          <div class="muted" style="margin-top:8px;">
+            Tip: if you can’t see your network, confirm the Wi‑Fi country/region was set correctly in Pi Imager OS customisation.
+          </div>
+        </li>
+        <li style="margin-top:8px;">
+          <strong>Windows copy/paste (PowerShell):</strong> (requires SSH enabled and the Pi reachable on Ethernet)
+          <div class="muted" style="margin-top:6px;">Replace <span class="mono">&lt;pi-ip&gt;</span>, <span class="mono">&lt;ssid&gt;</span>, <span class="mono">&lt;wifi-password&gt;</span>.</div>
+          <pre class="mono" style="margin-top:8px; white-space:pre-wrap;">ssh pi@&lt;pi-ip&gt; "sudo nmcli dev wifi connect '&lt;ssid&gt;' password '&lt;wifi-password&gt;'"</pre>
+          <div class="muted">If this fails, use the HDMI method above.</div>
+        </li>
+      </ol>
+    </div>
+
     <div class="card" id="order">
       <div class="h2">Recommended order (cloud → Pi)</div>
       <ol style="margin-top:10px;">

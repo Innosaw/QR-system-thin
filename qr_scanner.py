@@ -853,6 +853,11 @@ class QRScanner:
         self.current_operator = ""
         self.current_operator_date = ""
         self._load_operator_state()
+        try:
+            from database_schema import DB_PATH as _DBP
+            logging.info("v1 scanner DB_PATH=%s", _DBP)
+        except Exception:
+            pass
         self.running = False
         self.camera = None
         # Bound the queue so a burst of unique/noisy decodes can't exhaust RAM.
