@@ -11,6 +11,10 @@ This guide covers:
 ## 0) What you need
 
 - A **Raspberry Pi** (the model your kit specifies)
+- Recommended models:
+  - **Pi 5** (recommended)
+  - **Pi 4** (works well)
+  - Other Pis with a 40‑pin GPIO header may work; performance varies
 - **Power supply**
 - **microSD card** (quality card recommended)
 - A **powered USB hub** + your USB scanner dongles
@@ -93,6 +97,19 @@ Open in a browser (same network):
 - **Admin Mapping**: `http://<pi-ip>:5006/admin`
 - **Raw Scans**: `http://<pi-ip>:5006/raw_scans`
 - **Help**: `http://<pi-ip>:5006/help`
+
+---
+
+## 4.5) Install the Thin Pi software (fresh OS install)
+
+If you flashed a normal Raspberry Pi OS image (not a pre-built Innosaw image), install thin mode like this:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Innosaw/QR-system-thin/main/thin_pi/install_thin_pi.sh -o install_thin_pi.sh
+sudo bash install_thin_pi.sh
+```
+
+This installs to: `~/qr-system` and starts the service: `innosaw-thin`
 
 ---
 

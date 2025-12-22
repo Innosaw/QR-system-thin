@@ -69,16 +69,9 @@
             <div class="row" style="margin-top:6px;">
                 <div class="field">
                     <label>Station Code</label>
-                    <select id="map_station">
-                        <option value="H10">H10</option>
-                        <option value="H08">H08</option>
-                        <option value="Edge">Edge</option>
-                        <option value="Dowel">Dowel</option>
-                        <option value="Sort">Sort</option>
-                        <option value="Pull">Pull</option>
-                        <option value="QC">QC</option>
-                        <option value="Assembly">Assembly</option>
-                    </select>
+                    <input id="map_station" list="station_list" placeholder="Station code (must match cloud)" />
+                    <datalist id="station_list"></datalist>
+                    <div class="small">Tip: after pairing, this list auto-populates from cloud stations.</div>
                 </div>
                 <div class="field">
                     <label>Display Name (optional)</label>
@@ -228,7 +221,7 @@
         function clearForm() {
             selectedDevicePath = '';
             document.getElementById('map_device_input').value = '';
-            document.getElementById('map_station').value = 'H10';
+            document.getElementById('map_station').value = '';
             document.getElementById('map_name').value = '';
             document.getElementById('selected_hint').textContent = '';
             document.getElementById('device_preview').textContent = '(none)';
@@ -422,19 +415,22 @@
                 if (!res.ok || data.error) return;
                 const stations = data.stations || [];
                 if (!stations.length) return;
-                const sel = document.getElementById('map_station');
-                const current = sel.value;
-                sel.innerHTML = '';
+                const dl = document.getElementById('station_list');
+                if (!dl) return;
+                const current = (document.getElementById('map_station').value || '').trim();
+                dl.innerHTML = '';
                 stations.forEach(s => {
-                    const code = (s.station_code || '').toString();
-                    const name = (s.display_name || '').toString();
+                    const code = (s.station_code || '').toString().trim();
+                    const name = (s.display_name || '').toString().trim();
+                    if (!code) return;
                     const o = document.createElement('option');
                     o.value = code;
-                    o.textContent = name ? `${code} — ${name}` : code;
-                    sel.appendChild(o);
+                    // Some browsers show label text in the dropdown; value remains the station_code.
+                    if (name) o.label = name;
+                    dl.appendChild(o);
                 });
-                // Preserve selection if possible
-                if (current) sel.value = current;
+                // Keep any typed value unchanged
+                if (current) document.getElementById('map_station').value = current;
             } catch {
                 // ignore
             }

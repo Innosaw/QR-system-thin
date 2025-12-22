@@ -18,10 +18,10 @@ INSTALL_DIR="/home/${PI_USER}/qr-system"
 ENV_FILE="/etc/innosaw-thin.env"
 SERVICE_NAME="innosaw-thin"
 # Repo URL for the thin installer.
-# - Default points at the full monorepo for internal use.
-# - For customer deployments, you can host a thin-only public repo and set:
-#     INNOSAW_THIN_REPO_URL=https://github.com/Innosaw/QR-system-thin.git
-REPO_URL="${INNOSAW_THIN_REPO_URL:-https://github.com/Innosaw/QR-system.git}"
+# Default points at the thin-only repo (public) so installs never require a GitHub login.
+# To override (internal/dev), set:
+#   INNOSAW_THIN_REPO_URL=https://github.com/Innosaw/QR-system.git
+REPO_URL="${INNOSAW_THIN_REPO_URL:-https://github.com/Innosaw/QR-system-thin.git}"
 
 echo "[1/7] Base packages"
 apt-get update -y

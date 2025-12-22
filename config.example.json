@@ -1,13 +1,8 @@
 {
-  "station_id": "Station_8_QC",
-  "station_code": "QC",
+  "station_id": "",
+  "station_code": "",
   "multi_scanner_mode": false,
-  "scanners": {
-    "/dev/input/event1": {
-      "station_code": "QC",
-      "station_sheet": "Station_8_QC"
-    }
-  },
+  "scanners": {},
   "input": {
     "mode": "barcode_scanner",
     "barcode_device": "",
