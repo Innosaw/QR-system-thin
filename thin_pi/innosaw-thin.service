@@ -1,0 +1,21 @@
+[Unit]
+Description=Innosaw Thin Pi (multi-scanner + admin mapping UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/qr-system
+EnvironmentFile=-/etc/innosaw-thin.env
+
+Restart=always
+RestartSec=2
+
+ExecStart=/home/pi/qr-system/.venv/bin/python /home/pi/qr-system/thin_pi/thin_pi_runtime.py
+
+[Install]
+WantedBy=multi-user.target
+
+

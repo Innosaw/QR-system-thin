@@ -1,0 +1,57 @@
+{
+  "station_id": "Station_8_QC",
+  "station_code": "QC",
+  "multi_scanner_mode": false,
+  "scanners": {
+    "/dev/input/event1": {
+      "station_code": "QC",
+      "station_sheet": "Station_8_QC"
+    }
+  },
+  "input": {
+    "mode": "barcode_scanner",
+    "barcode_device": "",
+    "allow_camera_mode": false
+  },
+  "scanning": {
+    "scan_timeout": 5.0,
+    "duplicate_timeout": 3.0,
+    "auto_advance": true,
+    "bin_context_timeout": 20.0
+  },
+  "gpio": {
+    "led_pin": 18,
+    "buzzer_pin": 16,
+    "button_pin": 21
+  },
+  "operator": {
+    "current": "",
+    "auto_login_qr": "OPERATOR:Default"
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "logs/qr_scanner.log",
+    "max_size_mb": 10,
+    "backup_count": 5
+  },
+  "access_control": {
+    "local_access_enabled": true,
+    "remote_access_enabled": true,
+    "users": {},
+    "default_level": "view_only"
+  },
+  "cloud_v2": {
+    "enabled": false,
+    "base_url": "https://v2.innosaw.work",
+    "station_token": "",
+    "station_tokens": {},
+    "thin_mode": false,
+    "send_operator": false,
+    "timeout_seconds": 8,
+    "queue_path": "cloud_queue/scans.jsonl",
+    "archive_path": "cloud_backup/scans_archive.jsonl",
+    "flush_batch_size": 200
+  }
+}
+
+

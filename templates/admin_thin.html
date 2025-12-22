@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Innosaw Thin Scanner - Admin Mapping</title>
+    <link rel="stylesheet" href="/static/common.css?v=20251222">
+    <style>
+        .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+        .msg { margin-top:10px; font-size:13px; }
+        .msg.ok { color:#065f46; }
+        .msg.err { color:#991b1b; }
+        .small { font-size:12px; color:#666; }
+        .field { margin-bottom: 10px; }
+        .field label { display:block; font-weight:600; font-size:12px; margin-bottom:4px; }
+        .field input, .field select { min-width: 260px; }
+        #map_device_input { min-width: 620px; max-width: 100%; }
+        .device-preview { margin-top:6px; font-size:12px; color:#444; }
+        .device-preview .mono { word-break: break-all; }
+        .row-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        .clickable tr { cursor:pointer; }
+        .clickable tr:hover { background:#f7fafc; }
+        .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#1f2937; font-size:12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛠️ Admin Mapping (Thin)</h1>
+        <div class="subtitle">Map USB dongles to stations. No other admin tools run locally in thin mode.</div>
+        <div class="nav">
+            <a href="/">Dashboard</a>
+            <a class="active" href="/admin">Admin Mapping</a>
+            <a href="/raw_scans">Raw Scans</a>
+            <a href="/help">Help</a>
+            <a href="{{ cloud_url }}" target="_blank" rel="noopener">Cloud Dashboard</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>Detect USB Dongles</h2>
+            <div class="row">
+                <button class="btn btn-primary" onclick="detectDongles()">Detect</button>
+                <span class="small">Plug in dongles first. We prefer <span class="mono">/dev/input/by-path</span> stable paths.</span>
+            </div>
+            <div class="msg" id="dongle_msg"></div>
+            <div id="detected_dongles" style="margin-top:10px; border:1px solid #eee; border-radius:6px; padding:10px; max-height:220px; overflow:auto;">
+                <em>Click Detect to list devices…</em>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Station Mapping</h2>
+            <div class="small">This writes to <span class="mono">config.json</span> → <span class="mono">scanners{}</span>.</div>
+            <!-- Row 1: Device selection (full-width) -->
+            <div class="row" style="margin-top:10px;">
+                <div class="field" style="flex: 1; min-width: 520px;">
+                    <label>Device Path</label>
+                    <input id="map_device_input" list="device_list" placeholder="/dev/input/by-path/..." />
+                    <datalist id="device_list"></datalist>
+                    <div class="device-preview">
+                        Selected: <span class="mono" id="device_preview">(none)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2: Station + name + actions -->
+            <div class="row" style="margin-top:6px;">
+                <div class="field">
+                    <label>Station Code</label>
+                    <select id="map_station">
+                        <option value="H10">H10</option>
+                        <option value="H08">H08</option>
+                        <option value="Edge">Edge</option>
+                        <option value="Dowel">Dowel</option>
+                        <option value="Sort">Sort</option>
+                        <option value="Pull">Pull</option>
+                        <option value="QC">QC</option>
+                        <option value="Assembly">Assembly</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Display Name (optional)</label>
+                    <input id="map_name" placeholder="H10 CNC">
+                </div>
+                <div class="row-actions">
+                    <button class="btn btn-primary" onclick="saveMapping()">Save</button>
+                    <button class="btn btn-secondary" onclick="clearForm()">Clear</button>
+                    <button class="btn" style="background:#7f1d1d;" onclick="deleteSelected()">Delete</button>
+                    <button class="btn btn-secondary" onclick="loadMappings()">Refresh</button>
+                </div>
+            </div>
+
+            <div class="msg" id="map_msg"></div>
+            <div class="small" id="selected_hint" style="margin-top:6px;"></div>
+            <div style="margin-top:12px; overflow:auto; max-height:420px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Device Path</th>
+                            <th>Station</th>
+                            <th>Name</th>
+                        </tr>
+                    </thead>
+                    <tbody id="map_tbody" class="clickable">
+                        <tr><td colspan="3">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Backup (Download)</h2>
+            <div class="small">For support: download your local config + any local scan/archive/queue/log files. No import is needed on thin.</div>
+            <div class="row" style="margin-top:10px;">
+                <a class="btn btn-primary" href="/api/thin/backup/download">Download Backup ZIP</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Cloud Pairing (No manual tokens)</h2>
+            <div class="small">
+                Generate a pairing code in Cloud Admin → “Pair a Pi”, then enter it here. This Pi will automatically fetch station tokens and save them locally.
+            </div>
+            <div class="row" style="margin-top:10px;">
+                <div class="field">
+                    <label>Cloud Base URL</label>
+                    <input id="pair_base_url" value="{{ cloud_url.rstrip('/') }}" placeholder="https://v2.innosaw.work">
+                </div>
+                <div class="field">
+                    <label>Pairing Code</label>
+                    <input id="pair_code" placeholder="paste code">
+                </div>
+                <button class="btn btn-primary" onclick="pairNow()">Pair</button>
+            </div>
+            <div class="msg" id="pair_msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>Raw Scan Data</h2>
+            <div class="small">View / download raw scans locally (no cloud parsing).</div>
+            <div class="row" style="margin-top:10px;">
+                <a class="btn btn-secondary" href="/raw_scans">View Raw Scans</a>
+                <a class="btn btn-primary" href="/api/thin/raw_scans/download">Download Raw JSONL</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Clear Local Scan Data (for imaging)</h2>
+            <div class="small">
+                This deletes local scan artifacts on this Pi (archive/queue/logs). Use this before cloning an SD card image.
+                It does <strong>not</strong> change your station mappings or cloud tokens.
+            </div>
+            <div class="row" style="margin-top:10px;">
+                <button class="btn btn-secondary" onclick="clearLocalData()">Clear Local Data</button>
+            </div>
+            <div class="msg" id="clear_msg"></div>
+        </div>
+    </div>
+
+    <script>
+        let donglesCache = [];
+        let mappingsCache = [];
+        let selectedDevicePath = '';
+        function setMsg(id, text, ok) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.className = 'msg ' + (ok ? 'ok' : 'err');
+            el.textContent = text || '';
+        }
+
+        function populateDeviceList() {
+            const dl = document.getElementById('device_list');
+            if (!dl) return;
+            dl.innerHTML = '';
+            const opts = new Set();
+            (donglesCache || []).forEach(d => {
+                const p = (d?.stable_path || d?.path || '').toString().trim();
+                if (p) opts.add(p);
+            });
+            (mappingsCache || []).forEach(m => {
+                const p = (m?.device_path || '').toString().trim();
+                if (p) opts.add(p);
+            });
+            Array.from(opts).sort().forEach(p => {
+                const o = document.createElement('option');
+                o.value = p;
+                dl.appendChild(o);
+            });
+        }
+
+        async function detectDongles() {
+            setMsg('dongle_msg', 'Detecting…', true);
+            try {
+                const res = await fetch('/api/admin/dongles/detect');
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('dongle_msg', data.error || res.statusText, false);
+                    return;
+                }
+                donglesCache = data.scanners || [];
+                const el = document.getElementById('detected_dongles');
+                el.innerHTML = donglesCache.length
+                    ? donglesCache.map(d => `
+                        <div style="padding: 8px; border-bottom: 1px solid #eee;">
+                            <div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;">
+                                <strong>${(d.name || 'Unknown')}</strong>
+                                <button class="btn btn-secondary" style="padding:6px 10px;" onclick="useDevice('${String((d.stable_path || d.path || '')).replace(/'/g,'&#39;')}')">Use</button>
+                            </div>
+                            <div class="mono small">${(d.stable_path || d.path || '')}</div>
+                        </div>
+                    `).join('')
+                    : '<em>No devices detected.</em>';
+                setMsg('dongle_msg', `Found ${donglesCache.length} device(s)`, true);
+                populateDeviceList();
+            } catch (e) {
+                setMsg('dongle_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        function useDevice(path) {
+            const dp = (path || '').toString().replace(/&#39;/g, "'").trim();
+            document.getElementById('map_device_input').value = dp;
+            document.getElementById('device_preview').textContent = dp || '(none)';
+        }
+
+        function clearForm() {
+            selectedDevicePath = '';
+            document.getElementById('map_device_input').value = '';
+            document.getElementById('map_station').value = 'H10';
+            document.getElementById('map_name').value = '';
+            document.getElementById('selected_hint').textContent = '';
+            document.getElementById('device_preview').textContent = '(none)';
+            setMsg('map_msg', '', true);
+        }
+
+        async function loadMappings() {
+            const tbody = document.getElementById('map_tbody');
+            tbody.innerHTML = '<tr><td colspan="3">Loading…</td></tr>';
+            try {
+                const res = await fetch('/api/admin/stations');
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    tbody.innerHTML = `<tr><td colspan="3">${data.error || res.statusText}</td></tr>`;
+                    return;
+                }
+                mappingsCache = data.stations || [];
+                populateDeviceList();
+                if (!mappingsCache.length) {
+                    tbody.innerHTML = '<tr><td colspan="3"><em>No mappings yet.</em></td></tr>';
+                    return;
+                }
+                const esc = (v) => String(v ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+
+                tbody.innerHTML = mappingsCache.map(s => {
+                    const dp = esc(s.device_path || '');
+                    const sc = esc(s.station_code || '');
+                    const dn = esc(s.display_name || '');
+                    return `
+                        <tr data-device="${dp}">
+                            <td class="mono">${dp}</td>
+                            <td>${sc}</td>
+                            <td>${dn}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="3">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function selectRow(devicePath) {
+            const row = (mappingsCache || []).find(m => (m.device_path || '') === devicePath);
+            if (!row) return;
+            selectedDevicePath = devicePath;
+            document.getElementById('map_device_input').value = devicePath;
+            if (row.station_code) document.getElementById('map_station').value = row.station_code;
+            document.getElementById('map_name').value = row.display_name || '';
+            document.getElementById('selected_hint').innerHTML = `Selected: <span class="pill mono">${devicePath}</span>`;
+        }
+
+        async function saveMapping() {
+            const dp = (document.getElementById('map_device_input').value || '').trim();
+            const sc = (document.getElementById('map_station').value || '').trim();
+            const dn = (document.getElementById('map_name').value || '').trim();
+            if (!dp || !sc) {
+                setMsg('map_msg', 'Select a device path and station code.', false);
+                return;
+            }
+            setMsg('map_msg', 'Saving…', true);
+            try {
+                // Fetch existing mappings first
+                const curRes = await fetch('/api/admin/stations');
+                const cur = await curRes.json();
+                const stations = (cur.stations || []);
+                // Update or insert
+                const next = [];
+                let found = false;
+                stations.forEach(s => {
+                    if ((s.device_path || '') === dp) {
+                        found = true;
+                        next.push({ device_path: dp, station_code: sc, display_name: dn || sc, station_sheet: s.station_sheet || '' });
+                    } else {
+                        next.push({ device_path: s.device_path, station_code: s.station_code, display_name: s.display_name, station_sheet: s.station_sheet || '' });
+                    }
+                });
+                if (!found) {
+                    next.push({ device_path: dp, station_code: sc, display_name: dn || sc, station_sheet: '' });
+                }
+                const res = await fetch('/api/admin/stations', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ stations: next })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('map_msg', data.error || res.statusText, false);
+                    return;
+                }
+                setMsg('map_msg', 'Saved mapping.', true);
+                selectedDevicePath = dp;
+                document.getElementById('device_preview').textContent = dp || '(none)';
+                await loadMappings();
+            } catch (e) {
+                setMsg('map_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function deleteSelected() {
+            const dp = (document.getElementById('map_device_input').value || '').trim();
+            if (!dp) {
+                setMsg('map_msg', 'Select a mapping row or enter a device path to delete.', false);
+                return;
+            }
+            if (!confirm(`Delete mapping for:\n${dp}\n\nThis only removes the station mapping on this Pi.`)) return;
+            setMsg('map_msg', 'Deleting…', true);
+            try {
+                const curRes = await fetch('/api/admin/stations');
+                const cur = await curRes.json();
+                const stations = (cur.stations || []).filter(s => (s.device_path || '') !== dp);
+                const res = await fetch('/api/admin/stations', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ stations })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('map_msg', data.error || res.statusText, false);
+                    return;
+                }
+                setMsg('map_msg', 'Deleted mapping.', true);
+                clearForm();
+                await loadMappings();
+            } catch (e) {
+                setMsg('map_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function pairNow() {
+            const baseUrl = (document.getElementById('pair_base_url').value || '').trim();
+            const code = (document.getElementById('pair_code').value || '').trim();
+            if (!baseUrl || !code) {
+                setMsg('pair_msg', 'Cloud base URL and pairing code are required.', false);
+                return;
+            }
+            setMsg('pair_msg', 'Pairing…', true);
+            try {
+                const res = await fetch('/api/thin/pair/claim', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ base_url: baseUrl, code })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('pair_msg', data.error || res.statusText, false);
+                    return;
+                }
+                const count = Object.keys(data.station_tokens || {}).length;
+                setMsg('pair_msg', `Paired successfully. Received ${count} station token(s).`, true);
+                // Clear code after successful pairing
+                document.getElementById('pair_code').value = '';
+                // Refresh station list from cloud so dropdowns match (avoid typos)
+                await refreshCloudStations();
+            } catch (e) {
+                setMsg('pair_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function clearLocalData() {
+            const ok = confirm('Clear local scan data on this Pi?\\n\\nThis will delete local archives/queues/logs. This cannot be undone.');
+            if (!ok) return;
+            setMsg('clear_msg', 'Clearing…', true);
+            try {
+                const res = await fetch('/api/thin/clear_local_data', {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                    body: JSON.stringify({}),
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('clear_msg', data.error || res.statusText, false);
+                    return;
+                }
+                const n = (data.deleted || []).length;
+                const e = (data.errors || []).length;
+                setMsg('clear_msg', e ? `Cleared with ${e} error(s). Deleted ${n} item(s).` : `Cleared. Deleted ${n} item(s).`, !e);
+            } catch (e) {
+                setMsg('clear_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function refreshCloudStations() {
+            try {
+                const res = await fetch('/api/thin/cloud/stations');
+                const data = await res.json();
+                if (!res.ok || data.error) return;
+                const stations = data.stations || [];
+                if (!stations.length) return;
+                const sel = document.getElementById('map_station');
+                const current = sel.value;
+                sel.innerHTML = '';
+                stations.forEach(s => {
+                    const code = (s.station_code || '').toString();
+                    const name = (s.display_name || '').toString();
+                    const o = document.createElement('option');
+                    o.value = code;
+                    o.textContent = name ? `${code} — ${name}` : code;
+                    sel.appendChild(o);
+                });
+                // Preserve selection if possible
+                if (current) sel.value = current;
+            } catch {
+                // ignore
+            }
+        }
+
+        // Row click → load into editor (avoid inline onclick string escaping issues)
+        document.getElementById('map_tbody').addEventListener('click', (e) => {
+            const tr = e.target && e.target.closest ? e.target.closest('tr[data-device]') : null;
+            if (!tr) return;
+            const dp = tr.dataset.device || '';
+            if (dp) {
+                selectRow(dp);
+                document.getElementById('device_preview').textContent = dp || '(none)';
+            }
+        });
+
+        // keep preview synced while typing
+        document.getElementById('map_device_input').addEventListener('input', () => {
+            const v = (document.getElementById('map_device_input').value || '').trim();
+            document.getElementById('device_preview').textContent = v || '(none)';
+        });
+
+        loadMappings();
+        // best-effort: if already paired, load station list from cloud to avoid typos
+        refreshCloudStations();
+        // Optional auto-detect on load
+        // detectDongles();
+    </script>
+</body>
+</html>
+
+

@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manufacturing Scanner Dashboard</title>
+    <link rel="stylesheet" href="/static/common.css?v=20251222">
+    <style>
+        /* Page-specific styles only - common styles are in common.css */
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .status-card h3 {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #0d2137;
+        }
+        
+        .status-card .label {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+        
+        .scanner-list {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .scanner-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .scanner-item:last-child {
+            border-bottom: none;
+        }
+        
+        .scanner-name {
+            font-weight: 500;
+        }
+
+        .scanner-group {
+            margin-top: 8px;
+            padding-top: 12px;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #0d2137;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #1a3a5c;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        
+        .recent-scans {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .scan-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+        
+        .scan-item:last-child {
+            border-bottom: none;
+        }
+        
+        .timestamp {
+            color: #999;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Manufacturing Scanner Dashboard</h1>
+        <div class="subtitle">Real-time production monitoring and station status</div>
+        <div class="nav">
+            <a class="active" href="/">Dashboard</a>
+            <a href="/reports">Reports</a>
+            <a href="/inventory">Inventory</a>
+            <a href="/maintenance">Maintenance</a>
+            <a href="/recuts">Recuts</a>
+            <a href="/tools">Tools</a>
+            <a href="/scans">Scan Log</a>
+            <a href="/admin">Admin</a>
+            <a class="ext-link" data-port="5000" data-path="/" href="http://localhost:5000">Bin Manager</a>
+            <a class="ext-link" data-port="5007" data-path="/" href="http://localhost:5007">API</a>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="status-grid">
+            <div class="status-card">
+                <h3>System Status</h3>
+                <div class="value" id="service-status">Loading...</div>
+                <div class="label">QR Scanner Service</div>
+            </div>
+            
+            <div class="status-card">
+                <h3>Active Scanners</h3>
+                <div class="value" id="active-scanners">0</div>
+                <div class="label">Connected Devices</div>
+            </div>
+            
+            <div class="status-card">
+                <h3>Scans (24h)</h3>
+                <div class="value" id="scan-count">0</div>
+                <div class="label">Total Scans</div>
+            </div>
+            
+            <div class="status-card">
+                <h3>Uptime</h3>
+                <div class="value" id="uptime" style="font-size: 18px;">Loading...</div>
+                <div class="label">System Running</div>
+            </div>
+        </div>
+        
+        <div class="scanner-list">
+            <h3 style="margin-bottom: 15px;">Scanner Status</h3>
+            <div id="scanner-list">
+                <div class="scanner-item">
+                    <span>Loading scanners...</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <button class="btn btn-primary" onclick="restartService()">🔄 Restart Service</button>
+            <button class="btn btn-secondary" onclick="refreshStatus()">🔄 Refresh</button>
+        </div>
+        
+        <div class="recent-scans" style="margin-top: 20px;">
+            <h3 style="margin-bottom: 15px;">Recent Scans</h3>
+            <div id="recent-scans">
+                <div class="scan-item">Loading recent scans...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function fixExternalLinks() {
+            const host = window.location.hostname || 'localhost';
+            const proto = (window.location.protocol === 'https:') ? 'https' : 'http';
+            const portStr = window.location.port || '';
+
+            // Public: https://qr.<domain> <-> https://bins.<domain>
+            const hostParts = host.split('.');
+            const sub = hostParts[0];
+            const baseDomain = (hostParts.length >= 3 && (sub === 'qr' || sub === 'bins'))
+                ? hostParts.slice(1).join('.')
+                : null;
+            const onPublicHttps = !!baseDomain && proto === 'https';
+
+            // LAN single-host nginx: no :5000/:5006 exposed; bin manager lives under /bins/
+            const behindProxyNoPorts = !portStr || portStr === '80' || portStr === '443';
+
+            document.querySelectorAll('.ext-link').forEach(a => {
+                const port = a.getAttribute('data-port');
+                const path = a.getAttribute('data-path') || '/';
+
+                // API server (:5007) is not exposed via tunnel (and usually not proxied on LAN).
+                if (port === '5007' && (onPublicHttps || behindProxyNoPorts)) {
+                    a.style.display = 'none';
+                    return;
+                }
+
+                // Bin Manager link
+                if (port === '5000') {
+                    if (onPublicHttps) {
+                        a.href = `https://bins.${baseDomain}${path}`;
+                        return;
+                    }
+                    if (behindProxyNoPorts) {
+                        const p = path.startsWith('/') ? path : `/${path}`;
+                        a.href = `${proto}://${host}/bins${p}`;
+                        return;
+                    }
+                }
+
+                // Default direct-port behavior
+                if (port) a.href = `${proto}://${host}:${port}${path}`;
+            });
+        }
+
+        function updateStatus() {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('service-status').textContent = 
+                        data.service_status ? '🟢 Running' : '🔴 Stopped';
+                    const scannersObj = (data.scanners || {});
+                    const scannerEntries = Object.entries(scannersObj);
+                    const activeCount = scannerEntries.filter(([_, s]) => !!(s && s.running)).length;
+                    document.getElementById('active-scanners').textContent = activeCount;
+                    document.getElementById('scan-count').textContent = 
+                        data.recent_scans?.last_24_hours || 0;
+                    document.getElementById('uptime').textContent = 
+                        data.system_uptime || 'Unknown';
+                    
+                    // Update scanner list
+                    const scannerList = document.getElementById('scanner-list');
+                    scannerList.innerHTML = '';
+                    
+                    if (scannerEntries.length === 0) {
+                        scannerList.innerHTML = '<div class="scanner-item"><span>No scanners configured</span></div>';
+                    } else {
+                        const profileForStation = (stationCode) => {
+                            const s = (stationCode || '').toString().toUpperCase();
+                            if (s === 'H08' || s === 'H10') return 'CNC';
+                            if (s === 'EDGE') return 'Edgebander';
+                            if (s === 'DOWEL') return 'Dowel';
+                            if (s === 'ASSEMBLY') return 'Assembly';
+                            if (s === 'QC') return 'QC';
+                            return 'Other';
+                        };
+
+                        const profileOrder = ['CNC', 'Edgebander', 'Dowel', 'Assembly', 'QC', 'Other'];
+
+                        const grouped = {};
+                        for (const [device, status] of scannerEntries) {
+                            const stationCode = (status && status.station_code) ? status.station_code : '';
+                            const profile = profileForStation(stationCode);
+                            (grouped[profile] ||= []).push([device, status]);
+                        }
+
+                        for (const profile of profileOrder) {
+                            const rows = grouped[profile] || [];
+                            if (!rows.length) continue;
+
+                            const header = document.createElement('div');
+                            header.className = 'scanner-group';
+                            header.textContent = profile;
+                            scannerList.appendChild(header);
+
+                            // Sort within group by station code, then device path
+                            rows.sort((a, b) => {
+                                const aCode = (a[1]?.station_code || '').toString();
+                                const bCode = (b[1]?.station_code || '').toString();
+                                if (aCode !== bCode) return aCode.localeCompare(bCode);
+                                return (a[0] || '').toString().localeCompare((b[0] || '').toString());
+                            });
+
+                            for (const [device, status] of rows) {
+                            const item = document.createElement('div');
+                            item.className = 'scanner-item';
+                            item.innerHTML = `
+                                <div>
+                                    <div class="scanner-name">${(status.station_code || 'Unknown')} Station</div>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span class="status-badge ${status.running ? 'status-active' : 'status-inactive'}">
+                                        ${status.running ? 'Active' : 'Inactive'}
+                                    </span>
+                                    <button onclick="restartScanner('${status.station_code}')" 
+                                            class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;">
+                                        Restart
+                                    </button>
+                                </div>
+                            `;
+                            scannerList.appendChild(item);
+                            }
+                        }
+                    }
+                })
+                .catch(e => console.error('Error:', e));
+        }
+        
+        function loadRecentScans() {
+            fetch('/api/scans/recent')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('recent-scans');
+                    if (data.scans && data.scans.length > 0) {
+                        container.innerHTML = data.scans.map(scan => 
+                            `<div class="scan-item">
+                                <div>${scan.data || 'Scan data'}</div>
+                                <div class="timestamp">${scan.timestamp || ''}</div>
+                            </div>`
+                        ).join('');
+                    } else {
+                        container.innerHTML = '<div class="scan-item">No recent scans</div>';
+                    }
+                })
+                .catch(e => console.error('Error:', e));
+        }
+        
+        function restartService() {
+            if (!confirm('Restart QR Scanner service?')) return;
+            
+            fetch('/api/service/restart', {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Service restarted successfully');
+                        setTimeout(updateStatus, 2000);
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(e => alert('Error: ' + e));
+        }
+        
+        function restartScanner(stationCode) {
+            if (!confirm(`Restart ${stationCode} scanner?`)) return;
+            
+            fetch(`/api/scanner/restart_by_station/${stationCode}`, {method: 'POST'})
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert(`${stationCode} scanner restarted successfully`);
+                        setTimeout(updateStatus, 1000);
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(e => alert('Error: ' + e));
+        }
+        
+        function refreshStatus() {
+            updateStatus();
+            loadRecentScans();
+        }
+        
+        // Auto-refresh every 5 seconds
+        setInterval(refreshStatus, 5000);
+        fixExternalLinks();
+        refreshStatus();
+    </script>
+</body>
+</html>
+

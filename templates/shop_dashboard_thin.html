@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Innosaw Thin Scanner - Dashboard</title>
+    <link rel="stylesheet" href="/static/common.css?v=20251222">
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Scanner Dashboard (Thin)</h1>
+        <div class="subtitle">Local status + mapping + backups. Full logic runs in the cloud.</div>
+        <div class="nav">
+            <a class="active" href="/">Dashboard</a>
+            <a href="/admin">Admin Mapping</a>
+            <a href="/raw_scans">Raw Scans</a>
+            <a href="/help">Help</a>
+            <a href="{{ cloud_url }}" target="_blank" rel="noopener">Cloud Dashboard</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>Status</h2>
+            <div style="display:flex; gap:14px; flex-wrap:wrap;">
+                <div class="card" style="flex:1; min-width:240px;">
+                    <h2 style="margin-bottom:6px;">Service</h2>
+                    <div id="service-status" style="font-size:28px; font-weight:700;">Loading…</div>
+                    <div style="font-size:12px; color:#666; margin-top:6px;">Thin scanner service</div>
+                </div>
+                <div class="card" style="flex:1; min-width:240px;">
+                    <h2 style="margin-bottom:6px;">Scanners</h2>
+                    <div id="active-scanners" style="font-size:28px; font-weight:700;">0</div>
+                    <div style="font-size:12px; color:#666; margin-top:6px;">Configured / active devices</div>
+                </div>
+                <div class="card" style="flex:1; min-width:240px;">
+                    <h2 style="margin-bottom:6px;">Scans (24h)</h2>
+                    <div id="scan-count" style="font-size:28px; font-weight:700;">0</div>
+                    <div style="font-size:12px; color:#666; margin-top:6px;">Local count</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 10px; font-size: 13px; color: #555;">
+                Tip: If you have cloud service, use <strong>Cloud Dashboard</strong>. If you don’t, you’ll be prompted to log in / request access.
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Recent Scans (Local Archive)</h2>
+            <div style="font-size:12px; color:#666; margin-bottom:8px;">
+                These are the last forwarded scans saved locally (works offline too).
+            </div>
+            <div id="recent-scans" style="border:1px solid #eee; border-radius:6px; padding:10px; max-height:260px; overflow:auto;">
+                <em>Loading…</em>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function refreshStatus() {
+            try {
+                const res = await fetch('/api/status', { headers: { 'Accept': 'application/json' } });
+                const data = await res.json();
+                document.getElementById('service-status').textContent = (data?.service_status ? 'Running' : (data?.status || 'Unknown'));
+                document.getElementById('active-scanners').textContent = Object.keys(data?.scanners || {}).length;
+                document.getElementById('scan-count').textContent = (data?.recent_scans?.last_24_hours ?? data?.scans_today ?? 0);
+            } catch (e) {
+                document.getElementById('service-status').textContent = 'Error';
+            }
+        }
+
+        async function refreshRecentScans() {
+            const box = document.getElementById('recent-scans');
+            try {
+                const res = await fetch('/api/thin/recent_scans?limit=15', { headers: { 'Accept': 'application/json' } });
+                const data = await res.json();
+                const items = data?.items || [];
+                if (!items.length) {
+                    box.innerHTML = '<em>No scans yet.</em>';
+                    return;
+                }
+                box.innerHTML = items.map(it => {
+                    const ts = (it.timestamp || it.local_timestamp || '').toString();
+                    const station = (it.station_code || it.station || it.station_name || '').toString();
+                    const raw = (it.raw_data || it.data || it.payload || it.qr_data || it.code || '').toString();
+                    const safeRaw = raw.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    const src = (data?.source || '').toString();
+                    return `
+                        <div style="padding:8px; border-bottom:1px solid #eee;">
+                            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:baseline;">
+                                <strong>${station || 'Unknown station'}</strong>
+                                <span style="font-size:12px; color:#666;">${ts || ''}</span>
+                                ${src ? `<span style="font-size:12px; color:#999;">(${src})</span>` : ``}
+                            </div>
+                            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:12px; margin-top:4px;">
+                                ${safeRaw}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                box.innerHTML = '<em>Could not load recent scans.</em>';
+            }
+        }
+        refreshStatus();
+        refreshRecentScans();
+        setInterval(refreshStatus, 5000);
+        setInterval(refreshRecentScans, 7000);
+    </script>
+</body>
+</html>
+
+

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Innosaw Thin Pi - Help</title>
+  <link rel="stylesheet" href="/static/common.css?v=20251222">
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .muted { color:#666; font-size: 13px; }
+    .card { background: white; border-radius: 10px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 14px; }
+    .h2 { font-size: 18px; font-weight: 900; color:#0d2137; margin: 0 0 10px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>❓ Help (Thin Pi)</h1>
+    <div class="subtitle">Quick setup + mapping walkthrough</div>
+    <div class="nav">
+      <a href="/">Dashboard</a>
+      <a href="/admin">Admin Mapping</a>
+      <a href="/raw_scans">Raw Scans</a>
+      <a class="active" href="/help">Help</a>
+      <a href="{{ cloud_url }}" target="_blank" rel="noopener">Cloud Dashboard</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="card">
+      <div class="h2">Start here</div>
+      <div class="muted">
+        This Thin Pi runs the mapping UI locally and forwards scans to cloud in <span class="mono">thin_mode</span>.
+        Most setup questions are solved by the steps below.
+      </div>
+    </div>
+
+    <div class="card" id="login">
+      <div class="h2">How to access the Thin Pi UI</div>
+      <div class="muted" style="margin-top:6px;">
+        Replace <span class="mono">&lt;pi-ip&gt;</span> below with the current IP address of this Pi (example: <span class="mono">192.168.68.113</span>).
+        If the IP changes, the links will stop working until you use the new IP.
+      </div>
+      <ul style="margin-top:10px;">
+        <li><strong>Dashboard</strong>: <span class="mono">http://&lt;pi-ip&gt;:5006/</span></li>
+        <li><strong>Admin Mapping</strong>: <span class="mono">http://&lt;pi-ip&gt;:5006/admin</span></li>
+        <li><strong>Raw scans</strong>: <span class="mono">http://&lt;pi-ip&gt;:5006/raw_scans</span></li>
+      </ul>
+      <div class="muted">Tip: for SSH support, keep the username <span class="mono">pi</span> so you can always use <span class="mono">ssh pi@&lt;pi-ip&gt;</span>.</div>
+    </div>
+
+    <div class="card" id="ip">
+      <div class="h2">How to find the Pi IP address (and keep it from changing)</div>
+      <ul style="margin-top:10px;">
+        <li><strong>HDMI method</strong>: plug the Pi into a monitor/TV with HDMI. The IP address will be shown on-screen after boot.</li>
+        <li><strong>Router method</strong>: in your router, look for the device named something like <span class="mono">innosaw</span> or <span class="mono">raspberrypi</span> in the connected devices list.</li>
+        <li><strong>Recommended</strong>: set a <strong>DHCP reservation</strong> (sometimes called “Static DHCP” or “Address reservation”) in the router so the Pi always gets the same IP.</li>
+      </ul>
+      <div class="muted">
+        Why this matters: operators bookmark <span class="mono">http://&lt;pi-ip&gt;:5006/</span>. If the IP changes, bookmarks break.
+      </div>
+    </div>
+
+    <div class="card" id="imager">
+      <div class="h2">If you used a custom image and didn’t see Wi‑Fi/SSH options</div>
+      <div class="muted">
+        In Raspberry Pi Imager, Wi‑Fi/SSH/user settings are under <strong>OS customisation</strong>.
+        Some versions only show it after you click <strong>Next</strong> (then choose <strong>Edit settings</strong>).
+        If you still don’t see it, update Raspberry Pi Imager to the latest version.
+      </div>
+    </div>
+
+    <div class="card" id="order">
+      <div class="h2">Recommended order (cloud → Pi)</div>
+      <ol style="margin-top:10px;">
+        <li>In cloud, create/verify the shop + stations.</li>
+        <li>Generate a <strong>Pairing Code</strong> in Cloud Admin (“Pair a Pi”).</li>
+        <li>On the Pi, plug in the powered hub + dongles.</li>
+        <li>Go to <span class="mono">/admin</span> → Detect dongles → map each device to a station code.</li>
+        <li>Still in <span class="mono">/admin</span>, paste the pairing code → click <strong>Pair</strong>.</li>
+      </ol>
+    </div>
+
+    <div class="card" id="mapping">
+      <div class="h2">Dongle mapping (what to click)</div>
+      <ol style="margin-top:10px;">
+        <li>Open <span class="mono">/admin</span>.</li>
+        <li>Under “Detect USB Dongles”, click <strong>Detect</strong>.</li>
+        <li>For each dongle, click <strong>Use</strong> to copy its device path into the form.</li>
+        <li>Select the correct <strong>Station Code</strong> and click <strong>Save</strong>.</li>
+      </ol>
+      <div class="muted">
+        Use stable device paths (usually <span class="mono">/dev/input/by-path/...</span>). If you move dongles to different USB ports, paths can change.
+      </div>
+    </div>
+
+    <div class="card" id="verify">
+      <div class="h2">Verify forwarding is working</div>
+      <ul style="margin-top:10px;">
+        <li>Scan a label. You should see “Cloud v2 forwarded scan (thin mode)” in logs.</li>
+        <li>On the Pi (SSH): <span class="mono">sudo journalctl -u innosaw-thin -f</span></li>
+      </ul>
+    </div>
+
+    <div class="card" id="more">
+      <div class="h2">More detailed guide</div>
+      <div class="muted">
+        See the full setup guide shipped with the software: <span class="mono">thin_pi/THIN_PI_SETUP_GUIDE.md</span>
+        <br />
+        Cloud reference: <a href="{{ cloud_url.rstrip('/') }}/help#pi" target="_blank" rel="noopener">Cloud Help → Pi units</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+
+

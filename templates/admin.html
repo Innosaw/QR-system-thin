@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Manufacturing Dashboard</title>
+    <link rel="stylesheet" href="/static/common.css?v=20251222">
+    <style>
+        /* Page-specific styles only - common styles are in common.css */
+        
+        .row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: end;
+        }
+        
+        .field {
+            margin-bottom: 15px;
+        }
+        
+        .field input,
+        .field select {
+            min-width: 220px;
+        }
+        
+        .msg {
+            margin-top: 10px;
+            font-size: 13px;
+        }
+        
+        .msg.ok {
+            color: #065f46;
+        }
+        
+        .msg.err {
+            color: #991b1b;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛠️ Admin</h1>
+        <div class="subtitle">Operators, backups, and safe maintenance tools</div>
+        <div class="nav">
+            <a href="/">Dashboard</a>
+            <a href="/reports">Reports</a>
+            <a href="/inventory">Inventory</a>
+            <a href="/maintenance">Maintenance</a>
+            <a href="/recuts">Recuts</a>
+            <a href="/tools">Tools</a>
+            <a href="/scans">Scan Log</a>
+            <a class="active" href="/admin">Admin</a>
+            <a class="ext-link" data-port="5000" data-path="/" href="http://localhost:5000">Bin Manager</a>
+            <a class="ext-link" data-port="5007" data-path="/" href="http://localhost:5007">API</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>Operator Directory</h2>
+            <div class="row">
+                <div class="field">
+                    <label>Operator ID (from badge, e.g. JM)</label>
+                    <input id="op_id" placeholder="JM">
+                </div>
+                <div class="field">
+                    <label>Name (display)</label>
+                    <input id="op_name" placeholder="Joshua Matura">
+                </div>
+                <button class="btn btn-primary" onclick="saveOperator()">Save</button>
+                <button class="btn btn-secondary" onclick="loadOperators()">Refresh</button>
+            </div>
+            <div class="msg" id="op_msg"></div>
+            <div style="margin-top: 12px; overflow:auto; max-height: 420px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Active</th>
+                            <th>Role</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="op_tbody">
+                        <tr><td colspan="5">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Database Tools</h2>
+            <div class="row">
+                <button class="btn btn-primary" onclick="backupDb()">Backup Now</button>
+                <button class="btn btn-secondary" onclick="refreshBackups()">Refresh Backups</button>
+                <button class="btn btn-danger" onclick="purgeTestScans()">Purge test scans</button>
+            </div>
+            <div class="subtitle" style="margin-top: 8px;">
+                Backups are point-in-time DB snapshots. You can download them, copy to a USB drive, or sync the backups folder to OneDrive/Dropbox using rclone.
+            </div>
+            <div class="row" style="margin-top: 10px;">
+                <div class="field">
+                    <label>Scans: Date From</label>
+                    <input id="purge_date_from" type="date">
+                </div>
+                <div class="field">
+                    <label>Scans: Date To</label>
+                    <input id="purge_date_to" type="date">
+                </div>
+                <div class="field">
+                    <label>Scans: Station (optional)</label>
+                    <input id="purge_station" placeholder="H08">
+                </div>
+                <div class="field">
+                    <label>Scans: Job contains (optional)</label>
+                    <input id="purge_job_like" placeholder="Lone Rider">
+                </div>
+                <div class="field">
+                    <label>Mode</label>
+                    <select id="purge_mode">
+                        <option value="test" selected>test</option>
+                        <option value="all">all</option>
+                    </select>
+                </div>
+                <button class="btn btn-danger" onclick="purgeScansCustom()">Purge scans</button>
+            </div>
+            <div class="msg" id="db_msg"></div>
+
+            <div style="margin-top: 12px; overflow:auto; max-height: 260px;">
+                <div class="subtitle" id="backups_info" style="margin-bottom: 8px;"></div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Backup File</th>
+                            <th>Modified</th>
+                            <th>Size</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="backups_tbody">
+                        <tr><td colspan="4">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Image / Upload Backups</h2>
+            <div class="row">
+                <button class="btn btn-primary" onclick="backupUploads()">Backup Images Now</button>
+                <button class="btn btn-secondary" onclick="refreshUploadsBackups()">Refresh Image Backups</button>
+            </div>
+            <div class="subtitle" style="margin-top: 8px;">
+                Creates a .zip of uploaded files (maintenance photos, recut photos, and any job-board uploads if enabled). Download and store with your DB backups.
+            </div>
+            <div class="msg" id="uploads_msg"></div>
+
+            <div style="margin-top: 12px; overflow:auto; max-height: 260px;">
+                <div class="subtitle" id="uploads_backups_info" style="margin-bottom: 8px;"></div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Backup File</th>
+                            <th>Modified</th>
+                            <th>Size</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="uploads_backups_tbody">
+                        <tr><td colspan="4">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Cabinet Library</h2>
+            <div class="subtitle" style="margin-bottom: 10px;">Import cabinet-type required parts (CSV) into the bin manager</div>
+            <div class="row">
+                <div class="field">
+                    <label>Cabinet Library CSV</label>
+                    <input id="cabinet_csv" type="file" accept=".csv">
+                </div>
+                <button class="btn btn-primary" onclick="importCabinetLibraryCsv()">Import CSV</button>
+            </div>
+            <div class="msg" id="cabinet_msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>Cabinet Library Editor</h2>
+            <div class="subtitle" style="margin-bottom: 10px;">Edit required quantities, mark parts excluded, and delete cabinets/parts</div>
+            <div class="row">
+                <button class="btn btn-secondary" onclick="loadCabinetLibraryAdmin()">Load / Refresh</button>
+                <div class="field" style="min-width: 340px;">
+                    <label>Cabinet Type</label>
+                    <select id="lib_cabinet_select" onchange="renderCabinetLibraryEditor()">
+                        <option value="">(Load library to select)</option>
+                    </select>
+                </div>
+                <button class="btn btn-secondary" onclick="applyDrawerExclusionRules()">Apply DWR/DRW Rules</button>
+                <button class="btn btn-danger" onclick="deleteSelectedCabinetType()">Delete Cabinet Type</button>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+                <div class="field" style="min-width: 260px;">
+                    <label>Add Part: Name</label>
+                    <input id="lib_add_part" placeholder="e.g. Left Panel">
+                </div>
+                <div class="field" style="width: 140px;">
+                    <label>Qty</label>
+                    <input id="lib_add_qty" type="number" min="1" value="1">
+                </div>
+                <div class="field" style="width: 180px;">
+                    <label>Excluded?</label>
+                    <select id="lib_add_excluded">
+                        <option value="0" selected>No (case part)</option>
+                        <option value="1">Yes (excluded)</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" onclick="addCabinetPart()">Add Part</button>
+            </div>
+            <div style="margin-top: 12px; overflow:auto; max-height: 420px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="min-width: 360px;">Part</th>
+                            <th style="min-width: 160px;">Category</th>
+                            <th style="width: 90px;">Qty</th>
+                            <th style="width: 110px;">Excluded</th>
+                            <th style="width: 170px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lib_parts_tbody">
+                        <tr><td colspan="5">Load the library to begin</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="msg" id="lib_edit_msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>Recuts Cleanup</h2>
+            <div class="row">
+                <button class="btn btn-danger" onclick="purgeTestRecuts()">Purge test recuts</button>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+                <div class="field">
+                    <label>Recuts: Date From</label>
+                    <input id="recut_purge_date_from" type="date">
+                </div>
+                <div class="field">
+                    <label>Recuts: Date To</label>
+                    <input id="recut_purge_date_to" type="date">
+                </div>
+                <div class="field">
+                    <label>Recuts: Machine (optional)</label>
+                    <input id="recut_purge_machine" placeholder="H08">
+                </div>
+                <div class="field">
+                    <label>Recuts: Job contains (optional)</label>
+                    <input id="recut_purge_job_like" placeholder="Lone Rider">
+                </div>
+                <div class="field">
+                    <label>Mode</label>
+                    <select id="recut_purge_mode">
+                        <option value="test" selected>test</option>
+                        <option value="all">all</option>
+                    </select>
+                </div>
+                <button class="btn btn-danger" onclick="purgeRecutsCustom()">Purge recuts</button>
+            </div>
+            <div class="msg" id="recut_msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>USB Dongle Mapping</h2>
+            <div class="row">
+                <button class="btn btn-primary" onclick="detectDongles()">Detect USB Dongles</button>
+                <button class="btn btn-secondary" onclick="loadStations()">Refresh Stations</button>
+            </div>
+            <div class="msg" id="dongle_msg"></div>
+            <div class="row" style="margin-top: 12px; align-items: end; flex-wrap: wrap; gap: 10px;">
+                <div class="field">
+                    <label>Detected Dongle</label>
+                    <select id="add_device" style="width: 420px; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 11px;">
+                        <option value="" selected>Click "Detect USB Dongles" first</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Station</label>
+                    <select id="add_station_code" style="width: 140px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="" selected>(Select)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Display Name</label>
+                    <input id="add_display_name" placeholder="H08" style="width: 140px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                </div>
+                <button class="btn btn-primary" onclick="addStation()">Add Station</button>
+            </div>
+            <div style="margin-top: 12px; overflow:auto; max-height: 300px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Device Path</th>
+                            <th>Station Code</th>
+                            <th>Display Name</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stations_tbody">
+                        <tr><td colspan="4">Click "Detect USB Dongles" to start</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div style="margin-top: 12px;">
+                <h3 style="font-size: 14px; margin-bottom: 8px;">Detected Dongles (not yet mapped):</h3>
+                <div id="detected_dongles" style="max-height: 200px; overflow-y: auto; background: #f8f9fa; padding: 10px; border-radius: 4px;">
+                    <em>Click "Detect USB Dongles" to see available devices</em>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Admin Password</h2>
+            <div class="row">
+                <div class="field">
+                    <label>New Password</label>
+                    <input type="password" id="new_password" placeholder="Enter new password">
+                </div>
+                <div class="field">
+                    <label>Confirm Password</label>
+                    <input type="password" id="confirm_password" placeholder="Confirm password">
+                </div>
+                <button class="btn btn-primary" onclick="setPassword()">Set Password</button>
+            </div>
+            <div class="msg" id="password_msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>Shop Password (Edit Mode)</h2>
+            <div class="subtitle" style="margin-bottom: 10px;">When a password is set, the site is view-only unless the user logs in at <a href="/login">/login</a>.</div>
+            <div class="row">
+                <div class="field">
+                    <label>New Shop Password</label>
+                    <input type="password" id="shop_password" placeholder="Enter shop password">
+                </div>
+                <div class="field">
+                    <label>Confirm Shop Password</label>
+                    <input type="password" id="shop_password_confirm" placeholder="Confirm shop password">
+                </div>
+                <button class="btn btn-primary" onclick="setShopPassword()">Set Shop Password</button>
+            </div>
+            <div class="msg" id="shop_password_msg"></div>
+        </div>
+    </div>
+
+    <script>
+        let detectedDonglesCache = [];
+
+        function fixExternalLinks() {
+            const host = window.location.hostname || 'localhost';
+            const proto = (window.location.protocol === 'https:') ? 'https' : 'http';
+            const portStr = window.location.port || '';
+
+            const hostParts = host.split('.');
+            const sub = hostParts[0];
+            const baseDomain = (hostParts.length >= 3 && (sub === 'qr' || sub === 'bins'))
+                ? hostParts.slice(1).join('.')
+                : null;
+            const onPublicHttps = !!baseDomain && proto === 'https';
+            const behindProxyNoPorts = !portStr || portStr === '80' || portStr === '443';
+
+            document.querySelectorAll('.ext-link').forEach(a => {
+                const port = a.getAttribute('data-port');
+                const path = a.getAttribute('data-path') || '/';
+
+                if (port === '5007' && (onPublicHttps || behindProxyNoPorts)) {
+                    a.style.display = 'none';
+                    return;
+                }
+
+                if (port === '5000') {
+                    if (onPublicHttps) {
+                        a.href = `https://bins.${baseDomain}${path}`;
+                        return;
+                    }
+                    if (behindProxyNoPorts) {
+                        const p = path.startsWith('/') ? path : `/${path}`;
+                        a.href = `${proto}://${host}/bins${p}`;
+                        return;
+                    }
+                }
+
+                if (port) a.href = `${proto}://${host}:${port}${path}`;
+            });
+        }
+
+        function setMsg(id, text, ok) {
+            const el = document.getElementById(id);
+            el.className = 'msg ' + (ok ? 'ok' : 'err');
+            el.textContent = text;
+        }
+
+        async function importCabinetLibraryCsv() {
+            const input = document.getElementById('cabinet_csv');
+            if (!input || !input.files || input.files.length === 0) {
+                setMsg('cabinet_msg', 'Please choose a CSV file first.', false);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('csv_file', input.files[0]);
+
+            setMsg('cabinet_msg', 'Importing cabinet library…', true);
+            try {
+                const res = await fetch('/api/bin_manager/import_cabinet_library_csv', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('cabinet_msg', data.error || 'Import failed.', false);
+                    return;
+                }
+                if (data.success) {
+                    const ct = data.cabinet_types ?? 0;
+                    const parts = data.parts_imported ?? 0;
+                    setMsg('cabinet_msg', `Imported ${ct} cabinet types, ${parts} parts.`, true);
+                } else {
+                    setMsg('cabinet_msg', data.error || 'Import failed.', false);
+                }
+            } catch (e) {
+                setMsg('cabinet_msg', 'Import error: ' + (e?.message || e), false);
+            }
+        }
+
+        let cabinetLibraryAdminCache = null;
+
+        async function loadCabinetLibraryAdmin() {
+            setMsg('lib_edit_msg', 'Loading cabinet library…', true);
+            try {
+                const res = await fetch('/api/bin_manager/cabinet_library');
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('lib_edit_msg', data.error || res.statusText, false);
+                    return;
+                }
+                cabinetLibraryAdminCache = data;
+                const select = document.getElementById('lib_cabinet_select');
+                const cabinets = data.cabinets || {};
+                const names = Object.keys(cabinets).sort((a, b) => a.localeCompare(b));
+                const current = select.value;
+                select.innerHTML = '<option value="">(Select a cabinet type)</option>' +
+                    names.map(n => `<option value="${escapeAttr(n)}">${escapeHtml(n)}</option>`).join('');
+                if (current && names.includes(current)) select.value = current;
+                renderCabinetLibraryEditor();
+                setMsg('lib_edit_msg', `Loaded ${names.length} cabinet types.`, true);
+            } catch (e) {
+                setMsg('lib_edit_msg', 'Load error: ' + (e?.message || e), false);
+            }
+        }
+
+        function escapeHtml(s) {
+            return (s ?? '').toString()
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        function escapeAttr(s) {
+            return escapeHtml(s);
+        }
+
+        function renderCabinetLibraryEditor() {
+            const tbody = document.getElementById('lib_parts_tbody');
+            const select = document.getElementById('lib_cabinet_select');
+            const cabinetName = (select.value || '').trim();
+            if (!cabinetLibraryAdminCache || !cabinetLibraryAdminCache.cabinets) {
+                tbody.innerHTML = '<tr><td colspan="5">Load the library to begin</td></tr>';
+                return;
+            }
+            if (!cabinetName) {
+                tbody.innerHTML = '<tr><td colspan="5">Select a cabinet type</td></tr>';
+                return;
+            }
+
+            const cab = cabinetLibraryAdminCache.cabinets[cabinetName];
+            const caseParts = cab?.case_parts || [];
+            const excludedParts = cab?.excluded_parts || [];
+
+            const rows = [];
+            const addRow = (p, isExcluded) => {
+                rows.push(`
+                    <tr>
+                        <td class="mono">${escapeHtml(p.part_number || '')}</td>
+                        <td>${escapeHtml(p.part_category || '')}</td>
+                        <td><input type="number" min="1" value="${escapeAttr(p.required_quantity ?? 1)}" data-role="qty" data-cab="${escapeAttr(cabinetName)}" data-part="${escapeAttr(p.part_number || '')}"></td>
+                        <td style="text-align:center;"><input type="checkbox" data-role="excluded" data-cab="${escapeAttr(cabinetName)}" data-part="${escapeAttr(p.part_number || '')}" ${isExcluded ? 'checked' : ''}></td>
+                        <td>
+                            <button class="btn btn-secondary" data-role="save" data-cab="${escapeAttr(cabinetName)}" data-part="${escapeAttr(p.part_number || '')}">Save</button>
+                            <button class="btn btn-danger" data-role="delete" data-cab="${escapeAttr(cabinetName)}" data-part="${escapeAttr(p.part_number || '')}">Delete</button>
+                        </td>
+                    </tr>
+                `);
+            };
+            caseParts.forEach(p => addRow(p, false));
+            excludedParts.forEach(p => addRow(p, true));
+
+            tbody.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="5">No parts for this cabinet type</td></tr>';
+
+            // Wire up buttons (event delegation kept minimal)
+            tbody.querySelectorAll('button[data-role="save"]').forEach(btn => btn.addEventListener('click', onSaveCabinetPart));
+            tbody.querySelectorAll('button[data-role="delete"]').forEach(btn => btn.addEventListener('click', onDeleteCabinetPart));
+        }
+
+        async function onSaveCabinetPart(e) {
+            const btn = e.currentTarget;
+            const cabinet_name = btn.getAttribute('data-cab') || '';
+            const part_number = btn.getAttribute('data-part') || '';
+            const row = btn.closest('tr');
+            const qty = row?.querySelector('input[data-role="qty"]');
+            const excluded = row?.querySelector('input[data-role="excluded"]');
+            const required_quantity = parseInt(qty?.value || '1', 10) || 1;
+            const is_case_part = !(excluded?.checked);
+
+            setMsg('lib_edit_msg', `Saving ${cabinet_name} / ${part_number}…`, true);
+            const res = await fetch('/api/bin_manager/cabinet_library/part', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cabinet_name, part_number, required_quantity, is_case_part})
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('lib_edit_msg', data.error || res.statusText, false);
+                return;
+            }
+            await loadCabinetLibraryAdmin();
+        }
+
+        async function onDeleteCabinetPart(e) {
+            const btn = e.currentTarget;
+            const cabinet_name = btn.getAttribute('data-cab') || '';
+            const part_number = btn.getAttribute('data-part') || '';
+            if (!confirm(`Delete part "${part_number}" from "${cabinet_name}"?`)) return;
+
+            setMsg('lib_edit_msg', `Deleting ${cabinet_name} / ${part_number}…`, true);
+            const res = await fetch('/api/bin_manager/cabinet_library/part', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cabinet_name, part_number})
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('lib_edit_msg', data.error || res.statusText, false);
+                return;
+            }
+            await loadCabinetLibraryAdmin();
+        }
+
+        async function addCabinetPart() {
+            const select = document.getElementById('lib_cabinet_select');
+            const cabinet_name = (select.value || '').trim();
+            const part_number = (document.getElementById('lib_add_part').value || '').trim();
+            const required_quantity = parseInt(document.getElementById('lib_add_qty').value || '1', 10) || 1;
+            const excluded = document.getElementById('lib_add_excluded').value === '1';
+            const is_case_part = !excluded;
+
+            if (!cabinet_name) {
+                setMsg('lib_edit_msg', 'Select a cabinet type first.', false);
+                return;
+            }
+            if (!part_number) {
+                setMsg('lib_edit_msg', 'Enter a part name to add.', false);
+                return;
+            }
+
+            setMsg('lib_edit_msg', `Adding ${part_number}…`, true);
+            const res = await fetch('/api/bin_manager/cabinet_library/part', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cabinet_name, part_number, required_quantity, is_case_part})
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('lib_edit_msg', data.error || res.statusText, false);
+                return;
+            }
+            document.getElementById('lib_add_part').value = '';
+            document.getElementById('lib_add_qty').value = '1';
+            document.getElementById('lib_add_excluded').value = '0';
+            await loadCabinetLibraryAdmin();
+        }
+
+        async function deleteSelectedCabinetType() {
+            const select = document.getElementById('lib_cabinet_select');
+            const cabinet_name = (select.value || '').trim();
+            if (!cabinet_name) {
+                setMsg('lib_edit_msg', 'Select a cabinet type first.', false);
+                return;
+            }
+            if (!confirm(`Delete cabinet type "${cabinet_name}" from the library? This deletes all its parts.`)) return;
+
+            setMsg('lib_edit_msg', `Deleting cabinet type ${cabinet_name}…`, true);
+            const res = await fetch('/api/bin_manager/cabinet_library/cabinet/' + encodeURIComponent(cabinet_name), { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('lib_edit_msg', data.error || res.statusText, false);
+                return;
+            }
+            await loadCabinetLibraryAdmin();
+            document.getElementById('lib_cabinet_select').value = '';
+            renderCabinetLibraryEditor();
+        }
+
+        async function applyDrawerExclusionRules() {
+            if (!confirm('Apply global drawer rules?\n\n- Exclude any part containing DWR/DRW/DRAWER\n- Except keep DWR/DRW/DRAWER STRETCHER as case parts\n\nThis updates ALL cabinet types in the library.')) return;
+            setMsg('lib_edit_msg', 'Applying drawer rules…', true);
+            try {
+                const res = await fetch('/api/bin_manager/cabinet_library/reclassify_drawers', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('lib_edit_msg', data.error || res.statusText, false);
+                    return;
+                }
+                setMsg('lib_edit_msg', `Updated drawer parts across ${data.affected_cabinets ?? 0} cabinet types.`, true);
+                await loadCabinetLibraryAdmin();
+            } catch (e) {
+                setMsg('lib_edit_msg', 'Apply rules error: ' + (e?.message || e), false);
+            }
+        }
+
+        async function loadOperators() {
+            const tbody = document.getElementById('op_tbody');
+            tbody.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
+            const res = await fetch('/api/operators');
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                tbody.innerHTML = `<tr><td colspan="5">${data.error || res.statusText}</td></tr>`;
+                return;
+            }
+            const ops = data.operators || [];
+            if (!ops.length) {
+                tbody.innerHTML = '<tr><td colspan="5">No operators yet</td></tr>';
+                return;
+            }
+            const esc = (s) => (s ?? '').toString()
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+            tbody.innerHTML = ops.map(o => `
+                <tr>
+                    <td class="mono">${o.operator_id || ''}</td>
+                    <td>${o.name || ''}</td>
+                    <td>${o.active ? 'Yes' : 'No'}</td>
+                    <td>${o.role || 'operator'}</td>
+                    <td>
+                        <button class="btn btn-secondary"
+                                data-opid="${esc(o.operator_id || '')}"
+                                data-name="${esc(o.name || '')}"
+                                onclick="fillFromButton(this)">Edit</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function fillOperator(id, name) {
+            document.getElementById('op_id').value = id;
+            document.getElementById('op_name').value = name;
+        }
+
+        function fillFromButton(btn) {
+            const id = btn.getAttribute('data-opid') || '';
+            const name = btn.getAttribute('data-name') || '';
+            fillOperator(id, name);
+        }
+
+        async function saveOperator() {
+            const operator_id = document.getElementById('op_id').value.trim();
+            const name = document.getElementById('op_name').value.trim();
+            if (!operator_id) {
+                setMsg('op_msg', 'Operator ID is required', false);
+                return;
+            }
+            const res = await fetch('/api/operators', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({operator_id, name, active: true, role: 'operator'})
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('op_msg', data.error || res.statusText, false);
+                return;
+            }
+            setMsg('op_msg', 'Saved', true);
+            document.getElementById('op_id').value = '';
+            document.getElementById('op_name').value = '';
+            await loadOperators();
+        }
+
+        async function backupDb() {
+            setMsg('db_msg', 'Creating backup…', true);
+            const res = await fetch('/api/admin/db/backup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('db_msg', data.error || res.statusText, false);
+                return;
+            }
+            setMsg('db_msg', `Backup created: ${data.backup_path}`, true);
+            await refreshBackups();
+            await refreshUploadsBackups();
+        }
+
+        function _fmtBytes(n) {
+            const x = Number(n || 0);
+            if (!x) return '-';
+            const units = ['B','KB','MB','GB','TB'];
+            let v = x;
+            let i = 0;
+            while (v >= 1024 && i < units.length - 1) {
+                v /= 1024;
+                i++;
+            }
+            return (i === 0) ? `${v.toFixed(0)} ${units[i]}` : `${v.toFixed(1)} ${units[i]}`;
+        }
+
+        function _fmtTs(iso) {
+            if (!iso) return '-';
+            try {
+                return new Date(iso).toLocaleString();
+            } catch {
+                return iso;
+            }
+        }
+
+        function downloadBackup(filename) {
+            if (!filename) return;
+            window.location.href = '/api/admin/db/backups/' + encodeURIComponent(filename);
+        }
+
+        async function refreshBackups() {
+            const tbody = document.getElementById('backups_tbody');
+            const info = document.getElementById('backups_info');
+            if (tbody) tbody.innerHTML = '<tr><td colspan="4">Loading…</td></tr>';
+            if (info) info.textContent = '';
+            try {
+                const res = await fetch('/api/admin/db/backups?limit=25');
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    if (tbody) tbody.innerHTML = `<tr><td colspan="4">${escapeHtml(data.error || res.statusText)}</td></tr>`;
+                    return;
+                }
+                const backups = data.backups || [];
+                if (info) {
+                    const dbp = (data.db_path || '').toString();
+                    const dir = (data.backup_dir || '').toString();
+                    info.textContent = (dbp || dir) ? `DB: ${dbp} | Backups: ${dir}` : '';
+                }
+
+                if (!backups.length) {
+                    if (tbody) tbody.innerHTML = '<tr><td colspan="4">No backups yet. Click “Backup Now”.</td></tr>';
+                    return;
+                }
+                if (tbody) {
+                    tbody.innerHTML = backups.map(b => {
+                        const fn = (b.filename || '').toString();
+                        const sz = _fmtBytes(b.size_bytes);
+                        const ts = _fmtTs(b.modified);
+                        return `
+                            <tr>
+                                <td class="mono">${escapeHtml(fn)}</td>
+                                <td>${escapeHtml(ts)}</td>
+                                <td>${escapeHtml(sz)}</td>
+                                <td><button class="btn btn-secondary" onclick="downloadBackup('${escapeAttr(fn)}')">Download</button></td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            } catch (e) {
+                if (tbody) tbody.innerHTML = `<tr><td colspan="4">${escapeHtml(e?.message || e)}</td></tr>`;
+            }
+        }
+
+        function downloadUploadsBackup(filename) {
+            const safe = encodeURIComponent(filename || '');
+            window.location.href = `/api/admin/uploads/backups/${safe}`;
+        }
+
+        async function backupUploads() {
+            const msg = document.getElementById('uploads_msg');
+            if (msg) msg.textContent = 'Creating image backup…';
+            try {
+                const resp = await fetch('/api/admin/uploads/backup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    if (msg) msg.textContent = (data && data.error) ? data.error : 'Backup failed.';
+                    return;
+                }
+                const count = data.file_count != null ? data.file_count : '';
+                if (msg) msg.textContent = `Image backup created${count !== '' ? ` (${count} files)` : ''}.`;
+                await refreshUploadsBackups();
+            } catch (e) {
+                if (msg) msg.textContent = 'Backup failed (network / server unavailable).';
+            }
+        }
+
+        async function refreshUploadsBackups() {
+            const tbody = document.getElementById('uploads_backups_tbody');
+            const info = document.getElementById('uploads_backups_info');
+            if (tbody) tbody.innerHTML = '<tr><td colspan="4">Loading…</td></tr>';
+            if (info) info.textContent = '';
+            try {
+                const resp = await fetch('/api/admin/uploads/backups?limit=50');
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    if (tbody) tbody.innerHTML = `<tr><td colspan="4">${escapeHtml((data && data.error) ? data.error : 'Failed to load backups.')}</td></tr>`;
+                    return;
+                }
+                const backups = (data && data.backups) ? data.backups : [];
+                if (info) {
+                    const dir = (data.backup_dir || '').toString();
+                    const roots = Array.isArray(data.included_roots) ? data.included_roots.map(x => (x || '').toString()).filter(Boolean) : [];
+                    const rootsTxt = roots.length ? ` | Includes: ${roots.join(', ')}` : '';
+                    info.textContent = dir ? `Backups: ${dir}${rootsTxt}` : (rootsTxt ? rootsTxt.replace(/^ \| /, '') : '');
+                }
+
+                if (!backups.length) {
+                    if (tbody) tbody.innerHTML = '<tr><td colspan="4">No image backups yet. Click “Backup Images Now”.</td></tr>';
+                    return;
+                }
+
+                if (tbody) {
+                    tbody.innerHTML = backups.map(b => {
+                        const fn = (b.filename || '');
+                        const mod = b.modified ? _fmtTs(b.modified) : '';
+                        const sz = (b.size_bytes != null) ? _fmtBytes(b.size_bytes) : '';
+                        return `
+                            <tr>
+                                <td>${escapeHtml(fn)}</td>
+                                <td>${escapeHtml(mod)}</td>
+                                <td>${escapeHtml(sz)}</td>
+                                <td><button class="btn btn-secondary" onclick="downloadUploadsBackup('${escapeAttr(fn)}')">Download</button></td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            } catch (e) {
+                if (tbody) tbody.innerHTML = '<tr><td colspan="4">Failed to load backups (network / server unavailable).</td></tr>';
+            }
+        }
+
+        async function purgeTestScans() {
+            if (!confirm('Purge TEST scans? This will back up the DB first.')) return;
+            const res = await fetch('/api/admin/scans/purge', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({confirm:'DELETE', mode:'test', purge_related:true, backup:true})
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('db_msg', data.error || res.statusText, false);
+                return;
+            }
+            setMsg('db_msg', `Purged scans=${data.deleted_scans}, blocks=${data.deleted_blocks}, cycles=${data.deleted_cycles}`, true);
+        }
+
+        async function purgeScansCustom() {
+            if (!confirm('Purge scans using the filters above? This will back up the DB first.')) return;
+            const body = {
+                confirm: 'DELETE',
+                mode: (document.getElementById('purge_mode').value || 'test'),
+                purge_related: true,
+                backup: true,
+                date_from: document.getElementById('purge_date_from').value || '',
+                date_to: document.getElementById('purge_date_to').value || '',
+                station: (document.getElementById('purge_station').value || '').trim(),
+                job_like: (document.getElementById('purge_job_like').value || '').trim(),
+            };
+            const res = await fetch('/api/admin/scans/purge', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('db_msg', data.error || res.statusText, false);
+                return;
+            }
+            setMsg('db_msg', `Purged scans=${data.deleted_scans}, blocks=${data.deleted_blocks}, cycles=${data.deleted_cycles}`, true);
+        }
+
+        async function purgeTestRecuts() {
+            if (!confirm('Purge TEST recuts? This will back up the DB first.')) return;
+            const res = await fetch('/api/admin/recuts/purge', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({confirm:'DELETE', mode:'test', backup:true})
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('recut_msg', data.error || res.statusText, false);
+                return;
+            }
+            setMsg('recut_msg', `Purged recuts=${data.deleted_recuts}`, true);
+        }
+
+        async function purgeRecutsCustom() {
+            if (!confirm('Purge recuts using the filters above? This will back up the DB first.')) return;
+            const body = {
+                confirm: 'DELETE',
+                mode: (document.getElementById('recut_purge_mode').value || 'test'),
+                backup: true,
+                date_from: document.getElementById('recut_purge_date_from').value || '',
+                date_to: document.getElementById('recut_purge_date_to').value || '',
+                machine: (document.getElementById('recut_purge_machine').value || '').trim(),
+                job_like: (document.getElementById('recut_purge_job_like').value || '').trim(),
+            };
+            const res = await fetch('/api/admin/recuts/purge', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                setMsg('recut_msg', data.error || res.statusText, false);
+                return;
+            }
+            setMsg('recut_msg', `Purged recuts=${data.deleted_recuts}`, true);
+        }
+
+        async function detectDongles() {
+            setMsg('dongle_msg', 'Detecting USB dongles...', true);
+            try {
+                const res = await fetch('/api/admin/dongles/detect');
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('dongle_msg', data.error || res.statusText, false);
+                    return;
+                }
+                
+                const dongles = data.scanners || [];
+                detectedDonglesCache = dongles;
+                const donglesHtml = dongles.length > 0 
+                    ? dongles.map(d => `
+                        <div style="padding: 8px; border-bottom: 1px solid #ddd;">
+                            <strong>${d.name || 'Unknown Device'}</strong><br>
+                            <span class="mono" style="font-size: 11px;">${d.stable_path || d.path}</span><br>
+                            <span style="font-size: 11px; color: #666;">${d.phys || ''}</span>
+                        </div>
+                    `).join('')
+                    : '<em>No USB dongles detected. Make sure dongles are connected.</em>';
+                
+                document.getElementById('detected_dongles').innerHTML = donglesHtml;
+                setMsg('dongle_msg', `Found ${dongles.length} device(s)`, true);
+                await loadStations();
+            } catch (e) {
+                setMsg('dongle_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function loadStations() {
+            const tbody = document.getElementById('stations_tbody');
+            if (!tbody) return;
+            tbody.innerHTML = '<tr><td colspan="4">Loading...</td></tr>';
+            try {
+                const res = await fetch('/api/admin/stations');
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    tbody.innerHTML = `<tr><td colspan="4">${data.error || res.statusText}</td></tr>`;
+                    return;
+                }
+                
+                const stations = data.stations || [];
+                if (stations.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4">No stations configured. Use "Detect USB Dongles" to map devices.</td></tr>';
+                    return;
+                }
+                
+                const esc = (s) => (s ?? '').toString().replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+
+                const detectedPaths = (() => {
+                    const set = new Set();
+                    (detectedDonglesCache || []).forEach(d => {
+                        const p = (d?.stable_path || d?.path || '').toString();
+                        if (p) set.add(p);
+                    });
+                    return Array.from(set);
+                })();
+
+                const mappedByPath = (() => {
+                    const m = {};
+                    stations.forEach(st => {
+                        const p = (st?.device_path || '').toString();
+                        if (!p) return;
+                        m[p] = (st?.station_code || '').toString();
+                    });
+                    return m;
+                })();
+
+                const addRowDevice = document.getElementById('add_device');
+                const addRowCode = document.getElementById('add_station_code');
+                const addRowName = document.getElementById('add_display_name');
+
+                const STATION_PRESETS = [
+                    { profile: 'CNC', code: 'H08', name: 'H08', sheet: 'Station_1_H08' },
+                    { profile: 'CNC', code: 'H10', name: 'H10', sheet: 'Station_2_H10' },
+                    { profile: 'Edgebander', code: 'Edge', name: 'Edge', sheet: 'Station_3_Edge' },
+                    { profile: 'Dowel', code: 'Dowel', name: 'Dowel', sheet: 'Station_4_Dowel' },
+                    { profile: 'Sort', code: 'Sort', name: 'Sort', sheet: 'Station_5_Sorting' },
+                    { profile: 'Pull', code: 'Pull', name: 'Pull', sheet: 'Station_6_Pulling' },
+                    { profile: 'Assembly', code: 'Assembly', name: 'Assembly', sheet: 'Station_7_Assembly' },
+                    { profile: 'QC', code: 'QC', name: 'QC', sheet: 'Station_8_QC' },
+                    { profile: 'Shipping', code: 'Shipping', name: 'Shipping', sheet: 'Station_9_Shipping' },
+                ];
+
+                const presetByCode = (() => {
+                    const m = {};
+                    STATION_PRESETS.forEach(p => { m[p.code] = p; });
+                    return m;
+                })();
+
+                const buildStationOptionsHtml = (selectedCode) => {
+                    const selected = (selectedCode || '').toString();
+                    const groups = {};
+                    STATION_PRESETS.forEach(p => {
+                        (groups[p.profile] ||= []).push(p);
+                    });
+                    const order = ['CNC', 'Edgebander', 'Dowel', 'Assembly', 'Sort', 'Pull', 'Shipping', 'QC'];
+                    const opts = ['<option value=""' + (selected ? '' : ' selected') + '>(Select)</option>'];
+                    order.forEach(profile => {
+                        const rows = groups[profile] || [];
+                        if (!rows.length) return;
+                        opts.push(`<optgroup label="${esc(profile)}">`);
+                        rows.forEach(p => {
+                            const sel = (p.code === selected) ? ' selected' : '';
+                            opts.push(`<option value="${esc(p.code)}"${sel}>${esc(p.code)}</option>`);
+                        });
+                        opts.push('</optgroup>');
+                    });
+                    return opts.join('');
+                };
+
+                const applyStationPreset = (rowKeyDevicePath, stationCode) => {
+                    const key = (rowKeyDevicePath || '').toString();
+                    const code = (stationCode || '').toString();
+                    const preset = presetByCode[code];
+                    if (!preset) {
+                        updateStation(key, 'station_code', code);
+                        return;
+                    }
+                    updateStation(key, 'station_code', preset.code);
+                    updateStation(key, 'display_name', preset.name);
+                    // Keep station_sheet internal for compatibility (not shown in UI)
+                    updateStation(key, 'station_sheet', preset.sheet);
+                    loadStations();
+                };
+
+                window.applyStationPreset = applyStationPreset;
+
+                const labelForPath = (p, rowStationCode) => {
+                    const mappedStation = (mappedByPath[p] || '').toString();
+                    if (!mappedStation) return p;
+                    if (mappedStation === (rowStationCode || '').toString()) {
+                        return `${p} (this station)`;
+                    }
+                    return `✓ ${p} (mapped to ${mappedStation})`;
+                };
+
+                const buildDevicePathSelectHtml = (rowKeyDevicePath, rowStationCode) => {
+                    const rowKey = (rowKeyDevicePath || '').toString();
+                    const pending = stationUpdates[rowKey]?.device_path;
+                    const selectedValue = (pending || rowKey || '').toString();
+
+                    // Build candidate list:
+                    // - selectedValue (pending choice)
+                    // - rowKey (currently saved choice) if different
+                    // - detectedPaths (best choices)
+                    const candidates = [];
+                    if (selectedValue) candidates.push(selectedValue);
+                    if (rowKey && rowKey !== selectedValue) candidates.push(rowKey);
+                    detectedPaths.forEach(p => {
+                        if (!p) return;
+                        if (p === selectedValue) return;
+                        if (p === rowKey) return;
+                        candidates.push(p);
+                    });
+
+                    const options = candidates.map(p => {
+                        const sel = (p === selectedValue) ? ' selected' : '';
+                        const label = labelForPath(p, rowStationCode);
+                        return `<option value="${esc(p)}"${sel}>${esc(label)}</option>`;
+                    });
+
+                    if (!options.length) {
+                        options.push('<option value="" selected>(Select a device)</option>');
+                    }
+
+                    return `
+                        <select
+                            onchange="updateStationDevicePath('${esc(rowKey)}', this.value)"
+                            style="width: 420px; padding: 4px; border: 1px solid #ddd; border-radius: 4px; font-size: 11px;"
+                        >${options.join('')}</select>
+                    `;
+                };
+
+                const buildAddDeviceOptionsHtml = () => {
+                    const options = ['<option value="" selected>(Select detected dongle)</option>'];
+                    detectedPaths.forEach(p => {
+                        if (!p) return;
+                        const mappedStation = (mappedByPath[p] || '').toString();
+                        const label = mappedStation ? `✓ ${p} (mapped to ${mappedStation})` : p;
+                        options.push(`<option value="${esc(p)}">${esc(label)}</option>`);
+                    });
+                    return options.join('');
+                };
+
+                if (addRowDevice) {
+                    addRowDevice.innerHTML = buildAddDeviceOptionsHtml();
+                }
+
+                if (addRowCode) {
+                    const currentAdd = (addRowCode.value || '').toString();
+                    addRowCode.innerHTML = buildStationOptionsHtml(currentAdd);
+                    addRowCode.onchange = () => {
+                        const code = (addRowCode.value || '').toString();
+                        const preset = presetByCode[code];
+                        if (preset && addRowName && !addRowName.value) {
+                            addRowName.value = preset.name;
+                        }
+                    };
+                }
+                
+                tbody.innerHTML = stations.map(s => `
+                    <tr>
+                        <td>${buildDevicePathSelectHtml(s.device_path || '', s.station_code || '')}</td>
+                        <td>
+                            <select
+                                onchange="applyStationPreset('${esc(s.device_path)}', this.value)"
+                                style="width: 140px; padding: 4px; border: 1px solid #ddd; border-radius: 4px;">
+                                ${buildStationOptionsHtml((stationUpdates[(s.device_path || '').toString()]?.station_code) ?? (s.station_code || ''))}
+                            </select>
+                        </td>
+                        <td><input type="text" value="${esc((stationUpdates[(s.device_path || '').toString()]?.display_name) ?? (s.display_name || s.station_code || ''))}" 
+                            onchange="updateStation('${esc(s.device_path)}', 'display_name', this.value)"
+                            style="width: 140px; padding: 4px; border: 1px solid #ddd; border-radius: 4px;"></td>
+                        <td>
+                            <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" 
+                                onclick="saveStation('${esc(s.device_path)}')">Save</button>
+                            <button class="btn btn-danger" style="padding: 4px 8px; font-size: 11px; margin-left: 6px;"
+                                onclick="deleteStation('${esc(s.device_path)}')">Delete</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="4">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        const stationUpdates = {};
+
+        function updateStation(devicePath, field, value) {
+            if (!stationUpdates[devicePath]) {
+                stationUpdates[devicePath] = {old_device_path: devicePath, device_path: devicePath};
+            }
+            stationUpdates[devicePath][field] = value;
+        }
+
+        function updateStationDevicePath(oldDevicePath, newDevicePath) {
+            if (!oldDevicePath) return;
+            if (!stationUpdates[oldDevicePath]) {
+                stationUpdates[oldDevicePath] = {old_device_path: oldDevicePath, device_path: oldDevicePath};
+            }
+            stationUpdates[oldDevicePath].device_path = (newDevicePath || '').toString();
+            stationUpdates[oldDevicePath].allow_swap = true;
+        }
+
+        async function saveStation(devicePath) {
+            const update = stationUpdates[devicePath];
+            if (!update) {
+                setMsg('dongle_msg', 'No changes to save', false);
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/admin/stations', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({stations: [update]})
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('dongle_msg', data.error || res.statusText, false);
+                    return;
+                }
+                setMsg('dongle_msg', 'Station updated successfully', true);
+                delete stationUpdates[devicePath];
+                await loadStations();
+            } catch (e) {
+                setMsg('dongle_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function deleteStation(devicePath) {
+            if (!devicePath) return;
+            if (!confirm('Delete this station mapping?')) return;
+            try {
+                const res = await fetch('/api/admin/stations', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({stations: [{device_path: devicePath, delete: true}]})
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('dongle_msg', data.error || res.statusText, false);
+                    return;
+                }
+                setMsg('dongle_msg', 'Station deleted successfully', true);
+                delete stationUpdates[devicePath];
+                await loadStations();
+            } catch (e) {
+                setMsg('dongle_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function addStation() {
+            const device_path = (document.getElementById('add_device')?.value || '').toString();
+            const station_code = (document.getElementById('add_station_code')?.value || '').toString().trim();
+            const display_name = (document.getElementById('add_display_name')?.value || '').toString().trim();
+
+            if (!device_path) {
+                setMsg('dongle_msg', 'Select a detected dongle first.', false);
+                return;
+            }
+            if (!station_code) {
+                setMsg('dongle_msg', 'Station code is required.', false);
+                return;
+            }
+
+            // Keep station_sheet internal for compatibility.
+            const stationSheetForCode = (code) => {
+                const c = (code || '').toString();
+                const map = {
+                    'H08': 'Station_1_H08',
+                    'H10': 'Station_2_H10',
+                    'Edge': 'Station_3_Edge',
+                    'Dowel': 'Station_4_Dowel',
+                    'Sort': 'Station_5_Sorting',
+                    'Pull': 'Station_6_Pulling',
+                    'Assembly': 'Station_7_Assembly',
+                    'QC': 'Station_8_QC',
+                    'Shipping': 'Station_9_Shipping',
+                };
+                return map[c] || `Station_${c}`;
+            };
+
+            const station_sheet = stationSheetForCode(station_code);
+
+            try {
+                const res = await fetch('/api/admin/stations', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({stations: [{device_path, station_code, display_name, station_sheet}]})
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('dongle_msg', data.error || res.statusText, false);
+                    return;
+                }
+                setMsg('dongle_msg', 'Station added successfully', true);
+                await loadStations();
+            } catch (e) {
+                setMsg('dongle_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function setPassword() {
+            const password = document.getElementById('new_password').value;
+            const confirm = document.getElementById('confirm_password').value;
+            
+            if (!password) {
+                setMsg('password_msg', 'Password required', false);
+                return;
+            }
+            
+            if (password !== confirm) {
+                setMsg('password_msg', 'Passwords do not match', false);
+                return;
+            }
+            
+            try {
+                const res = await fetch('/api/admin/password/set', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({password})
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('password_msg', data.error || res.statusText, false);
+                    return;
+                }
+                setMsg('password_msg', 'Password set successfully', true);
+                document.getElementById('new_password').value = '';
+                document.getElementById('confirm_password').value = '';
+            } catch (e) {
+                setMsg('password_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function setShopPassword() {
+            const p1 = (document.getElementById('shop_password')?.value || '').trim();
+            const p2 = (document.getElementById('shop_password_confirm')?.value || '').trim();
+            if (!p1 || !p2) {
+                setMsg('shop_password_msg', 'Both fields are required.', false);
+                return;
+            }
+            if (p1 !== p2) {
+                setMsg('shop_password_msg', 'Passwords do not match.', false);
+                return;
+            }
+
+            setMsg('shop_password_msg', 'Saving shop password…', true);
+            try {
+                const res = await fetch('/api/shop/password/set', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ password: p1 })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('shop_password_msg', data.error || 'Failed to set shop password.', false);
+                    return;
+                }
+                document.getElementById('shop_password').value = '';
+                document.getElementById('shop_password_confirm').value = '';
+                setMsg('shop_password_msg', 'Shop password set. Users can log in at /login.', true);
+            } catch (e) {
+                setMsg('shop_password_msg', 'Error: ' + (e?.message || e), false);
+            }
+        }
+
+        (function init() {
+            fixExternalLinks();
+            loadOperators();
+            loadStations();
+            refreshBackups();
+        })();
+    </script>
+</body>
+</html>
+
+
