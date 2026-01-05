@@ -3306,7 +3306,13 @@ def get_kiosk_station_totals():
         parts = []
         total_sqft = 0.0
         
-        if "sand" in station_code.lower():
+        # Check station profile for sanding
+        cursor.execute('SELECT profile FROM stations WHERE station_code = ? LIMIT 1', (station_code,))
+        st_row = cursor.fetchone()
+        st_profile = (st_row['profile'] if st_row else '').lower()
+        is_sand = "sand" in station_code.lower() or station_code.lower() == "s" or st_profile == "sand"
+        
+        if is_sand:
             # Group by part to avoid doubling SQFT if scanned multiple times (start/stop)
             parts_map = {}
             for r in parts_raw:
@@ -3375,7 +3381,8 @@ def get_kiosk_station_totals():
         return jsonify({
             "count": count_row['count'] if count_row else 0,
             "parts": parts,
-            "total_sqft": round(total_sqft, 2)
+            "total_sqft": round(total_sqft, 2),
+            "is_sand": is_sand
         })
     except Exception as e:
         logging.error(f"Error fetching kiosk station totals: {e}")
@@ -4954,6 +4961,151 @@ def api_reports_custom_run_v1():
                 d['_edge_edges'] = None
             if _apply_filters_v1(d, filters):
                 data_rows.append(d)
+
+        # Handle Cycles mode (Timers)
+        kind = cfg.get('kind', 'aggregate').lower()
+        if kind == 'cycles':
+            key_fields = cfg.get('key_fields')
+            if not (isinstance(key_fields, list) and key_fields):
+                key_fields = ['cabinet_assembly', 'cabinet_name']
+            key_mode = str(cfg.get('key_mode') or 'tuple').lower()
+            try:
+                split_gap_min = int(cfg.get('split_on_gap_minutes') or 0)
+            except Exception: split_gap_min = 0
+            split_gap_s = split_gap_min * 60
+            try:
+                close_on_n = int(cfg.get('close_on_n_scans') or 0)
+            except Exception: close_on_n = 0
+            out_mode = str(cfg.get('output') or 'cycles').lower()
+            bucket = str(cfg.get('time_bucket') or 'none').lower()
+
+            def _cycle_key(d0):
+                if key_mode == 'first_nonempty':
+                    for f in key_fields:
+                        v = ('' if d0.get(f) is None else str(d0.get(f))).strip()
+                        if v: return v
+                    return ''
+                return tuple((('' if d0.get(f) is None else str(d0.get(f))).strip() or None) for f in key_fields)
+
+            def _bucket_label(ts):
+                if bucket in ('day', 'date'): return ts.date().isoformat()
+                if bucket == 'week':
+                    iso = ts.isocalendar()
+                    return f"{iso.year}-W{iso.week:02d}"
+                if bucket == 'month': return f"{ts.year:04d}-{ts.month:02d}"
+                return ''
+
+            normed = []
+            for d in data_rows:
+                ts = _parse_scan_ts(d.get('timestamp'))
+                if not ts: continue
+                d2 = dict(d)
+                d2['_ts'] = ts
+                d2['_ck'] = _cycle_key(d2)
+                normed.append(d2)
+
+            normed.sort(key=lambda x: (str(x.get('station_code') or '').lower(), str(x.get('_ck') or ''), x.get('_ts')))
+
+            cycles_out = []
+            cur = None
+
+            def _close_cycle(c):
+                start_ts = c['start_ts']
+                last_ts = c['last_ts']
+                dur_s = max(0, int((last_ts - start_ts).total_seconds()))
+                bkt = _bucket_label(start_ts)
+                row = {
+                    'station_code': c.get('station_code'),
+                    'station_display_name': c.get('station_display_name'),
+                    'operator_id': c.get('operator_id'),
+                    'job_name': c.get('job_name'),
+                    'run_name': c.get('run_name'),
+                    'material': c.get('material'),
+                    'gcode': c.get('gcode'),
+                    'cabinet_assembly': c.get('cabinet_assembly'),
+                    'cabinet_name': c.get('cabinet_name'),
+                    'opening_letter': c.get('opening_letter'),
+                    'group_key': str(c.get('group_key')),
+                    'bucket': bkt,
+                    'start_time': start_ts.isoformat(),
+                    'end_time': last_ts.isoformat(),
+                    'duration_seconds': dur_s,
+                    'scan_count': int(c.get('scan_count') or 0),
+                    'sqft': round(float(c.get('sqft') or 0.0), 3)
+                }
+                cycles_out.append(row)
+
+            for d in normed:
+                ck = d.get('_ck')
+                sc = d.get('station_code')
+                if not ck or not sc: continue
+                ts = d.get('_ts')
+                k = (str(sc).lower(), ck)
+
+                if cur is None or cur.get('key') != k:
+                    if cur: _close_cycle(cur)
+                    cur = {
+                        'key': k, 'station_code': sc, 'station_display_name': d.get('station_display_name') or sc,
+                        'operator_id': d.get('operator_id'), 'job_name': d.get('job_name'), 'run_name': d.get('run_name'),
+                        'material': d.get('material'), 'gcode': d.get('gcode'),
+                        'cabinet_assembly': d.get('cabinet_assembly'), 'cabinet_name': d.get('cabinet_name'),
+                        'opening_letter': d.get('opening_letter'), 'group_key': ck,
+                        'start_ts': ts, 'last_ts': ts, 'scan_count': 1,
+                        'sqft': float(_to_sqft_best_effort(d.get('part_length'), d.get('part_width')) or 0.0)
+                    }
+                else:
+                    gap = (ts - cur['last_ts']).total_seconds()
+                    if split_gap_s and gap > split_gap_s:
+                        _close_cycle(cur)
+                        cur = {
+                            'key': k, 'station_code': sc, 'station_display_name': d.get('station_display_name') or sc,
+                            'operator_id': d.get('operator_id'), 'job_name': d.get('job_name'), 'run_name': d.get('run_name'),
+                            'material': d.get('material'), 'gcode': d.get('gcode'),
+                            'cabinet_assembly': d.get('cabinet_assembly'), 'cabinet_name': d.get('cabinet_name'),
+                            'opening_letter': d.get('opening_letter'), 'group_key': ck,
+                            'start_ts': ts, 'last_ts': ts, 'scan_count': 1,
+                            'sqft': float(_to_sqft_best_effort(d.get('part_length'), d.get('part_width')) or 0.0)
+                        }
+                    else:
+                        cur['last_ts'] = ts
+                        cur['scan_count'] += 1
+                        new_sqft = float(_to_sqft_best_effort(d.get('part_length'), d.get('part_width')) or 0.0)
+                        if new_sqft > 0 and (cur.get('sqft') or 0) == 0:
+                            cur['sqft'] = new_sqft
+                        elif new_sqft > 0 and close_on_n == 0:
+                            cur['sqft'] += new_sqft
+                        
+                        if close_on_n and cur['scan_count'] >= close_on_n:
+                            _close_cycle(cur)
+                            cur = None
+            if cur: _close_cycle(cur)
+
+            if out_mode == 'summary':
+                gb = list(cfg.get('group_by') or [])
+                if bucket != 'none' and 'bucket' not in gb: gb = ['bucket', *gb]
+                agg2 = {}
+                for row in cycles_out:
+                    gk = tuple(row.get(k) for k in gb) if gb else tuple()
+                    if gk not in agg2:
+                        agg2[gk] = {k: row.get(k) for k in gb}
+                        agg2[gk].update({'cycles':0, 'scan_count':0, 'duration_seconds':0, 'sqft':0.0})
+                    a = agg2[gk]
+                    a['cycles'] += 1
+                    a['scan_count'] += row['scan_count']
+                    a['duration_seconds'] += row['duration_seconds']
+                    a['sqft'] += row['sqft']
+                
+                out_rows = list(agg2.values())
+                for r in out_rows:
+                    r['sqft'] = round(r['sqft'], 3)
+                    if r['sqft'] > 0 and r['duration_seconds'] > 0:
+                        r['seconds_per_sqft'] = round(r['duration_seconds'] / r['sqft'], 2)
+                
+                cols = [*gb, 'cycles', 'scan_count', 'duration_seconds', 'sqft', 'seconds_per_sqft']
+                return jsonify({'columns': cols, 'rows': out_rows, 'row_count': len(out_rows)})
+
+            cols = ['station_code', 'group_key', 'bucket', 'start_time', 'end_time', 'duration_seconds', 'scan_count', 'sqft', 'job_name', 'cabinet_assembly']
+            return jsonify({'columns': cols, 'rows': cycles_out, 'row_count': len(cycles_out)})
 
         # Aggregate engine
         agg = {}
