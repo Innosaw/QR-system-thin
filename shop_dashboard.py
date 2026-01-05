@@ -3290,6 +3290,7 @@ def get_kiosk_station_totals():
         sel_cols = ['job_name', 'timestamp']
         if 'cabinet_assembly' in scans_cols: sel_cols.append('cabinet_assembly')
         if 'part_name' in scans_cols: sel_cols.append('part_name')
+        if 'part_num' in scans_cols: sel_cols.append('part_num')
         if 'part_length' in scans_cols: sel_cols.append('part_length')
         if 'part_width' in scans_cols: sel_cols.append('part_width')
         
@@ -3298,27 +3299,77 @@ def get_kiosk_station_totals():
             SELECT {sel_sql}
             FROM scans
             WHERE station_code = ? AND DATE(timestamp) = ?
-            ORDER BY timestamp DESC LIMIT 50
+            ORDER BY timestamp ASC
         ''', (station_code, today))
         
+        parts_raw = cursor.fetchall()
         parts = []
         total_sqft = 0.0
-        for r in cursor.fetchall():
-            d = {
-                'job_name': r['job_name'],
-                'cabinet_assembly': r.get('cabinet_assembly') if 'cabinet_assembly' in scans_cols else None,
-                'part_name': r.get('part_name') if 'part_name' in scans_cols else None,
-                'timestamp': r['timestamp']
-            }
-            # Calculate SQFT if possible
-            if 'part_length' in scans_cols and 'part_width' in scans_cols:
-                l_in = _length_to_inches_best_effort(r.get('part_length')) or 0.0
-                w_in = _length_to_inches_best_effort(r.get('part_width')) or 0.0
-                sqft = (l_in * w_in) / 144.0
-                d['sqft'] = round(sqft, 2)
-                total_sqft += sqft
+        
+        if "sand" in station_code.lower():
+            # Group by part to avoid doubling SQFT if scanned multiple times (start/stop)
+            parts_map = {}
+            for r in parts_raw:
+                # Unique key for part: Job + Cabinet + (Part Num or Part Name)
+                pk = "|".join([
+                    str(r.get('job_name') or ""),
+                    str(r.get('cabinet_assembly') if 'cabinet_assembly' in scans_cols else ""),
+                    str(r.get('part_num') if 'part_num' in scans_cols else (r.get('part_name') if 'part_name' in scans_cols else ""))
+                ])
+                
+                if pk not in parts_map:
+                    d = {
+                        'job_name': r['job_name'],
+                        'cabinet_assembly': r.get('cabinet_assembly') if 'cabinet_assembly' in scans_cols else None,
+                        'part_name': r.get('part_name') if 'part_name' in scans_cols else None,
+                        'timestamp': r['timestamp'],
+                        'scan_count': 1,
+                        'first_ts': datetime.strptime(r['timestamp'], '%Y-%m-%d %H:%M:%S') if isinstance(r['timestamp'], str) else r['timestamp'],
+                        'last_ts': datetime.strptime(r['timestamp'], '%Y-%m-%d %H:%M:%S') if isinstance(r['timestamp'], str) else r['timestamp'],
+                        'sqft': 0.0
+                    }
+                    # Calculate SQFT if possible
+                    if 'part_length' in scans_cols and 'part_width' in scans_cols:
+                        l_in = _length_to_inches_best_effort(r.get('part_length')) or 0.0
+                        w_in = _length_to_inches_best_effort(r.get('part_width')) or 0.0
+                        d['sqft'] = round((l_in * w_in) / 144.0, 2)
+                    parts_map[pk] = d
+                else:
+                    parts_map[pk]["scan_count"] += 1
+                    cur_ts = datetime.strptime(r['timestamp'], '%Y-%m-%d %H:%M:%S') if isinstance(r['timestamp'], str) else r['timestamp']
+                    parts_map[pk]["last_ts"] = cur_ts
+                    parts_map[pk]["timestamp"] = r['timestamp']
+
+            # Convert map back to list and calculate total SQFT
+            for pk in parts_map:
+                p = parts_map[pk]
+                total_sqft += p["sqft"]
+                # Add duration if multiple scans
+                if p["scan_count"] >= 2:
+                    dur = (p["last_ts"] - p["first_ts"]).total_seconds()
+                    p["duration_seconds"] = int(dur)
+                parts.append(p)
             
-            parts.append(d)
+            # Sort newest first for display
+            parts.sort(key=lambda x: x["last_ts"], reverse=True)
+            parts = parts[:50]
+        else:
+            # Non-sanding: standard list
+            for r in reversed(parts_raw): # Newest first
+                d = {
+                    'job_name': r['job_name'],
+                    'cabinet_assembly': r.get('cabinet_assembly') if 'cabinet_assembly' in scans_cols else None,
+                    'part_name': r.get('part_name') if 'part_name' in scans_cols else None,
+                    'timestamp': r['timestamp']
+                }
+                if 'part_length' in scans_cols and 'part_width' in scans_cols:
+                    l_in = _length_to_inches_best_effort(r.get('part_length')) or 0.0
+                    w_in = _length_to_inches_best_effort(r.get('part_width')) or 0.0
+                    sqft = (l_in * w_in) / 144.0
+                    d['sqft'] = round(sqft, 2)
+                    total_sqft += sqft
+                parts.append(d)
+                if len(parts) >= 50: break
             
         conn.close()
         return jsonify({
