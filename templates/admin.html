@@ -1682,23 +1682,26 @@
                 setMsg('dongle_msg', `Found ${dongles.length} device(s)`, true);
                 
                 // Also update the dropdown
-                const sel = document.getElementById('add_device');
-                if (sel) {
-                    sel.innerHTML = '<option value="">(Select a device)</option>';
-                    dongles.forEach(d => {
-                        const p = (d.stable_path || d.path || '').toString();
-                        const mapped = mappedStations.find(s => s.device_path === p);
-                        const opt = document.createElement('option');
-                        opt.value = p;
-                        opt.textContent = (mapped ? `[USED: ${mapped.station_code}] ` : '') + (d.name || 'Device') + ' (' + p + ')';
-                        sel.appendChild(opt);
-                    });
-                }
+                updateAddDeviceDropdown(dongles, mappedStations);
 
                 await loadStations();
             } catch (e) {
                 setMsg('dongle_msg', 'Error: ' + e.message, false);
             }
+        }
+
+        function updateAddDeviceDropdown(dongles, mappedStations) {
+            const sel = document.getElementById('add_device');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">(Select a device)</option>';
+            dongles.forEach(d => {
+                const p = (d.stable_path || d.path || '').toString();
+                const mapped = mappedStations.find(s => s.device_path === p);
+                const opt = document.createElement('option');
+                opt.value = p;
+                opt.textContent = (mapped ? `[USED: ${mapped.station_code}] ` : '') + (d.name || 'Device') + ' (' + p + ')';
+                sel.appendChild(opt);
+            });
         }
 
         async function loadStations() {
@@ -1938,6 +1941,8 @@
                 setMsg('dongle_msg', 'Station updated successfully', true);
                 delete stationUpdates[devicePath];
                 await loadStations();
+                // Update indicators in detect list
+                if (detectedDonglesCache.length > 0) detectDongles();
             } catch (e) {
                 setMsg('dongle_msg', 'Error: ' + e.message, false);
             }
@@ -1960,6 +1965,8 @@
                 setMsg('dongle_msg', 'Station deleted successfully', true);
                 delete stationUpdates[devicePath];
                 await loadStations();
+                // Update indicators in detect list
+                if (detectedDonglesCache.length > 0) detectDongles();
             } catch (e) {
                 setMsg('dongle_msg', 'Error: ' + e.message, false);
             }
@@ -2011,6 +2018,8 @@
                 }
                 setMsg('dongle_msg', 'Station added successfully', true);
                 await loadStations();
+                // Update indicators in detect list
+                if (detectedDonglesCache.length > 0) detectDongles();
             } catch (e) {
                 setMsg('dongle_msg', 'Error: ' + e.message, false);
             }
