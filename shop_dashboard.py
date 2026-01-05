@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import json
 import os
+import re
 from flask import Response
 from jinja2 import TemplateNotFound
 from werkzeug.utils import secure_filename
@@ -589,12 +590,11 @@ def raw_scans_page():
 
 @app.route('/help')
 def help_page():
-    """Thin mode: local help / setup walkthrough."""
+    """Help / setup walkthrough."""
     try:
         if _thin_mode_enabled():
             return render_template('help_thin.html', cloud_url=_cloud_dashboard_url())
-        # Non-thin deployments: we don't ship a dedicated help page here.
-        return redirect('/')
+        return render_template('help.html')
     except TemplateNotFound:
         cloud_url = _cloud_dashboard_url()
         return f"""
@@ -1238,6 +1238,16 @@ def reports_page():
     except Exception as e:
         logging.error(f"Error rendering reports page: {e}", exc_info=True)
         return f"<h1>Error loading reports page</h1><p>{e}</p>", 500
+
+
+@app.route('/mobile')
+def mobile_scan_page():
+    """Mobile/tablet scan page (camera + manual input)."""
+    try:
+        return render_template('mobile_scan.html')
+    except Exception as e:
+        logging.error(f"Error rendering mobile scan page: {e}", exc_info=True)
+        return f"<h1>Error loading mobile scan page</h1><p>{e}</p>", 500
 
 # ============================================
 # API ENDPOINTS FOR DASHBOARDS
@@ -2107,6 +2117,205 @@ def admin_stations_proxy():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/admin/operator_barcodes', methods=['GET', 'POST'])
+def admin_operator_barcodes():
+    """Manage operator badge barcodes (barcode -> operator_id) stored in DB settings."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+    if not get_setting or not set_setting:
+        return jsonify({'error': 'Settings not available on this server'}), 501
+
+    key = 'operator_barcode_map_json'
+
+    def _load_map() -> dict:
+        try:
+            raw = (get_setting(key, '{}') or '{}')
+            mp = json.loads(raw) if isinstance(raw, str) else raw
+            return mp if isinstance(mp, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_map(mp: dict) -> None:
+        # Normalize
+        out = {}
+        for k, v in (mp or {}).items():
+            kk = (str(k) or '').strip()
+            vv = (str(v) or '').strip()
+            if kk and vv:
+                out[kk] = vv
+        set_setting(key, json.dumps(out))
+
+    if request.method == 'GET':
+        mp = _load_map()
+        items = [{'barcode': k, 'operator_id': v} for k, v in sorted(mp.items(), key=lambda kv: kv[0])]
+        return jsonify({'mappings': items, 'count': len(items)}), 200
+
+    body = request.get_json(silent=True) or {}
+    barcode = (body.get('barcode') or '').strip()
+    operator_id = (body.get('operator_id') or '').strip()
+    delete = bool(body.get('delete'))
+
+    mp = _load_map()
+    if delete:
+        if barcode:
+            mp.pop(barcode, None)
+            _save_map(mp)
+        items = [{'barcode': k, 'operator_id': v} for k, v in sorted(mp.items(), key=lambda kv: kv[0])]
+        return jsonify({'success': True, 'mappings': items, 'count': len(items)}), 200
+
+    if not barcode or not operator_id:
+        return jsonify({'error': 'barcode and operator_id are required'}), 400
+
+    mp[barcode] = operator_id
+    _save_map(mp)
+    items = [{'barcode': k, 'operator_id': v} for k, v in sorted(mp.items(), key=lambda kv: kv[0])]
+    return jsonify({'success': True, 'mappings': items, 'count': len(items)}), 200
+
+
+@app.route('/api/admin/scan_defaults', methods=['GET', 'POST'])
+def api_admin_scan_defaults():
+    """Manage v1 scan parsing defaults (CSV field mapping / barcode mapping) stored in DB settings.
+
+    Shape matches v2's scan_defaults:
+      { csv_fallback: { delimiter: "auto"|"|"|","|"^"|"\t", columns: [..] } , field_labels: {..}, custom_labels: {..} }
+    """
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+    if not get_setting or not set_setting:
+        return jsonify({'error': 'Settings not available on this server'}), 501
+
+    key = 'scan_defaults_json'
+
+    def _load() -> dict:
+        try:
+            raw = (get_setting(key, '{}') or '{}')
+            d = json.loads(raw) if isinstance(raw, str) else raw
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    if request.method == 'GET':
+        return jsonify({'scan_defaults': _load()}), 200
+
+    body = request.get_json(silent=True) or {}
+    defaults = body.get('scan_defaults')
+    if not isinstance(defaults, dict):
+        return jsonify({'error': 'scan_defaults dict required'}), 400
+
+    # Keep to safe keys only (no code injection)
+    allowed = {'tracking_mode', 'csv_fallback', 'custom_labels', 'field_labels'}
+    clean = {k: v for k, v in defaults.items() if k in allowed}
+    set_setting(key, json.dumps(clean))
+    return jsonify({'success': True, 'scan_defaults': clean}), 200
+
+
+@app.route('/api/admin/assembly_unit_rules', methods=['GET', 'POST'])
+def api_admin_assembly_unit_rules():
+    """Manage Assembly grouping rules (Case/Drawer/Door/QC/etc) stored in DB settings."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+
+    if not set_setting:
+        return jsonify({'error': 'Settings not available on this server'}), 501
+
+    key = 'assembly_unit_rules_json'
+
+    def _load() -> dict:
+        try:
+            raw = get_setting(key, '') if get_setting else ''
+            if not raw:
+                return {}
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    if request.method == 'GET':
+        return jsonify({'rules': _load()}), 200
+
+    body = request.get_json(silent=True) or {}
+    rules = body.get('rules')
+    if not isinstance(rules, dict):
+        return jsonify({'error': 'rules dict required'}), 400
+
+    # Store as JSON (kept in DB, used by scanner + api_server via database_schema.classify_assembly_unit)
+    try:
+        set_setting(key, json.dumps(rules))
+    except Exception as e:
+        return jsonify({'error': f'Failed to save rules: {e}'}), 500
+    return jsonify({'success': True, 'rules': rules}), 200
+
+
+@app.route('/api/admin/assembly_unit_rules/test', methods=['POST'])
+def api_admin_assembly_unit_rules_test():
+    """Test Assembly grouping rules against a sample context without saving."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+    body = request.get_json(silent=True) or {}
+    ctx = body.get('ctx') or {}
+    rules = body.get('rules')  # optional override
+    try:
+        from database_schema import classify_assembly_unit  # type: ignore
+        unit = classify_assembly_unit(
+            part_name=str(ctx.get('part_name') or ''),
+            station_code=str(ctx.get('station_code') or 'Assembly'),
+            station_display_name=str(ctx.get('station_display_name') or ''),
+            opening_letter=str(ctx.get('opening_letter') or ''),
+            rules_override=(rules if isinstance(rules, dict) else None),
+        )
+        return jsonify({'unit': unit}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/kiosk_layout', methods=['GET', 'POST'])
+def api_admin_kiosk_layout():
+    """Manage station kiosk layout config stored in DB settings.
+
+    This enables a no-code kiosk builder on /mobile kiosk mode.
+    """
+    if request.method == 'POST':
+        if _auth_enabled() and _current_role(session) != 'admin':
+            return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+    else:
+        # GET: allow viewer/shop role too
+        if _auth_enabled() and _current_role(session) not in ['admin', 'shop', 'viewer']:
+            return jsonify({'error': 'Authentication required'}), 401
+
+    if not get_setting or not set_setting:
+        return jsonify({'error': 'Settings not available on this server'}), 501
+
+    key = 'kiosk_layout_json'
+
+    def _load() -> dict:
+        try:
+            raw = (get_setting(key, '{}') or '{}')
+            d = json.loads(raw) if isinstance(raw, str) else raw
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    if request.method == 'GET':
+        return jsonify({'layout': _load()}), 200
+
+    body = request.get_json(silent=True) or {}
+    layout = body.get('layout')
+    if not isinstance(layout, dict):
+        return jsonify({'error': 'layout dict required'}), 400
+
+    # Keep keys constrained so we don't store arbitrary giant blobs
+    allowed_top = {'version', 'defaults', 'stations', 'station_types', 'bin_config'}
+    clean = {k: v for k, v in layout.items() if k in allowed_top}
+    if 'version' not in clean:
+        clean['version'] = 1
+
+    try:
+        set_setting(key, json.dumps(clean))
+    except Exception as e:
+        return jsonify({'error': f'Failed to save layout: {e}'}), 500
+    return jsonify({'success': True, 'layout': clean}), 200
+
+
 @app.route('/api/thin/recent_scans', methods=['GET'])
 def thin_recent_scans():
     """Return recent scans from the thin-mode local archive JSONL (best effort)."""
@@ -2536,6 +2745,67 @@ def admin_check_password_proxy():
     return resp, status
 
 
+@app.route('/api/scans/web', methods=['POST'])
+def scans_web_post():
+    """Allow browser/tablet to submit scans to local v1 DB.
+
+    This mirrors v2's /api/scans/web behavior but writes to the local v1 SQLite DB.
+    """
+    # Require at least shop role when auth enabled.
+    if _auth_enabled() and _current_role(session) not in ('shop', 'admin'):
+        return jsonify({'error': 'Not authorized. Please log in (shop or admin).'}), 401
+
+    payload = request.get_json(silent=True) or {}
+    station_code = (payload.get('station_code') or '').strip()
+    raw_data = (payload.get('raw_data') or '').strip()
+    operator_id = (payload.get('operator_id') or '').strip() or None
+    if not station_code:
+        return jsonify({'error': 'station_code required'}), 400
+    if not raw_data:
+        return jsonify({'error': 'raw_data required'}), 400
+
+    # Best-effort station display name from config.json scanners mapping.
+    station_display_name = None
+    try:
+        cfg_path = _config_path()
+        if cfg_path.exists():
+            with open(cfg_path, 'r') as f:
+                cfg = json.load(f) or {}
+            scanners = cfg.get('scanners', {}) or {}
+            for _dp, st_cfg in (scanners or {}).items():
+                if not isinstance(st_cfg, dict):
+                    continue
+                if (str(st_cfg.get('station_code') or '').strip() == station_code):
+                    station_display_name = (st_cfg.get('display_name') or st_cfg.get('station_code') or '').strip() or None
+                    break
+    except Exception:
+        station_display_name = None
+
+    try:
+        # Parse using the same parser logic (includes scan_defaults csv mapping support)
+        try:
+            # Local import to avoid pulling in camera deps unless needed
+            from qr_scanner import QRDataParser  # type: ignore
+        except Exception as ie:
+            return jsonify({'error': f'QRDataParser import failed: {ie}'}), 500
+
+        parser = QRDataParser(station_code)
+        parsed = parser.parse_scan_data(raw_data, operator=(operator_id or ''))
+        fields = parsed.get('parsed_fields') or {}
+        from database_schema import log_scan  # type: ignore
+        scan_id = log_scan(
+            station_code=station_code,
+            station_display_name=station_display_name,
+            raw_data=raw_data,
+            parsed_fields=fields,
+            operator_id=operator_id,
+        )
+        return jsonify({'success': True, 'scan_id': scan_id}), 200
+    except Exception as e:
+        logging.error("Web scan submit failed: %s", e, exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/password/set', methods=['POST'])
 def admin_set_password_proxy():
     """Proxy password set to API server"""
@@ -2857,10 +3127,30 @@ def get_station_reports():
         logging.error(f"Error fetching station reports: {e}")
         return jsonify({'error': str(e)}), 500
 
+def _get_station_display_names():
+    """Helper to get friendly names from config.json"""
+    try:
+        config_path = Path(__file__).parent / 'config.json'
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            scanners = config.get('scanners', {})
+            names = {}
+            for _, cfg in scanners.items():
+                code = cfg.get('station_code')
+                name = cfg.get('display_name')
+                if code and name:
+                    names[code] = name
+            return names
+    except Exception:
+        pass
+    return {}
+
 @app.route('/api/reports/daily')
 def get_daily_report():
     """Get daily production report"""
     try:
+        display_names = _get_station_display_names()
         if get_db_connection:
             # Use database directly
             conn = get_db_connection()
@@ -2874,7 +3164,7 @@ def get_daily_report():
             }
             
             # Get metrics for each station
-            for station in ['H08', 'H10', 'Edge', 'Dowel', 'Sort', 'Pull', 'Assembly', 'QC']:
+            for station in ['H08', 'H10', 'Edge', 'Dowel', 'Sort', 'Pull', 'Assembly', 'QC', 'Sand', 'Wrap']:
                 cursor.execute('''
                     SELECT COUNT(*) as scans, COUNT(DISTINCT job_name) as jobs
                     FROM scans WHERE station_code = ? AND DATE(timestamp) = ?
@@ -2882,7 +3172,8 @@ def get_daily_report():
                 row = cursor.fetchone()
                 report['stations'][station] = {
                     'scans': row['scans'],
-                    'jobs': row['jobs']
+                    'jobs': row['jobs'],
+                    'display_name': display_names.get(station, station)
                 }
             
             # Get bin summary
@@ -2912,6 +3203,133 @@ def get_daily_report():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/kiosk/cnc/status', methods=['GET'])
+def get_kiosk_cnc_status():
+    """Get active CNC sheet status for kiosk view"""
+    try:
+        station_code = request.args.get('station', '').strip()
+        if not station_code:
+            return jsonify({'error': 'station required'}), 400
+            
+        if not get_db_connection:
+            return jsonify({'error': 'Database unavailable'}), 503
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # In v1, we infer 'active' sheet from the latest open cycle for this station
+        cursor.execute("PRAGMA table_info(station_cycles)")
+        columns = {row['name'] for row in cursor.fetchall()}
+        
+        where = "station_code = ? AND status != 'closed'"
+        if 'auto_closed' in columns:
+            where += " AND auto_closed = 0"
+            
+        cursor.execute(f'''
+            SELECT job_name, gcode, start_time
+            FROM station_cycles
+            WHERE {where}
+            ORDER BY start_time DESC LIMIT 1
+        ''', (station_code,))
+        row = cursor.fetchone()
+        
+        # Get material if column exists
+        material = None
+        if row and 'material' in columns:
+            cursor.execute("SELECT material FROM station_cycles WHERE id = (SELECT id FROM station_cycles WHERE station_code = ? AND status != 'closed' ORDER BY start_time DESC LIMIT 1)", (station_code,))
+            m_row = cursor.fetchone()
+            material = m_row['material'] if m_row else None
+        
+        # Sheets today count
+        today = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM station_cycles 
+            WHERE station_code = ? AND DATE(start_time) = ?
+        ''', (station_code, today))
+        count_row = cursor.fetchone()
+        
+        conn.close()
+        
+        return jsonify({
+            "active": bool(row),
+            "job_name": row['job_name'] if row else None,
+            "material_name": material,
+            "gcode": row['gcode'] if row else None,
+            "sheets_today": count_row['count'] if count_row else 0
+        })
+    except Exception as e:
+        logging.error(f"Error fetching kiosk CNC status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/kiosk/station_totals', methods=['GET'])
+def get_kiosk_station_totals():
+    """Get scan counts and recent parts for a station"""
+    try:
+        station_code = request.args.get('station', '').strip()
+        if not station_code:
+            return jsonify({'error': 'station required'}), 400
+            
+        if not get_db_connection:
+            return jsonify({'error': 'Database unavailable'}), 503
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # Scans today
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM scans 
+            WHERE station_code = ? AND DATE(timestamp) = ?
+        ''', (station_code, today))
+        count_row = cursor.fetchone()
+        
+        # Recent parts (for sanding/wrap list)
+        cursor.execute("PRAGMA table_info(scans)")
+        scans_cols = {row['name'] for row in cursor.fetchall()}
+        
+        sel_cols = ['job_name', 'timestamp']
+        if 'cabinet_assembly' in scans_cols: sel_cols.append('cabinet_assembly')
+        if 'part_name' in scans_cols: sel_cols.append('part_name')
+        if 'part_length' in scans_cols: sel_cols.append('part_length')
+        if 'part_width' in scans_cols: sel_cols.append('part_width')
+        
+        sel_sql = ", ".join(sel_cols)
+        cursor.execute(f'''
+            SELECT {sel_sql}
+            FROM scans
+            WHERE station_code = ? AND DATE(timestamp) = ?
+            ORDER BY timestamp DESC LIMIT 50
+        ''', (station_code, today))
+        
+        parts = []
+        total_sqft = 0.0
+        for r in cursor.fetchall():
+            d = {
+                'job_name': r['job_name'],
+                'cabinet_assembly': r.get('cabinet_assembly') if 'cabinet_assembly' in scans_cols else None,
+                'part_name': r.get('part_name') if 'part_name' in scans_cols else None,
+                'timestamp': r['timestamp']
+            }
+            # Calculate SQFT if possible
+            if 'part_length' in scans_cols and 'part_width' in scans_cols:
+                l_in = _length_to_inches_best_effort(r.get('part_length')) or 0.0
+                w_in = _length_to_inches_best_effort(r.get('part_width')) or 0.0
+                sqft = (l_in * w_in) / 144.0
+                d['sqft'] = round(sqft, 2)
+                total_sqft += sqft
+            
+            parts.append(d)
+            
+        conn.close()
+        return jsonify({
+            "count": count_row['count'] if count_row else 0,
+            "parts": parts,
+            "total_sqft": round(total_sqft, 2)
+        })
+    except Exception as e:
+        logging.error(f"Error fetching kiosk station totals: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/sheet_processing_times', methods=['GET'])
 def get_sheet_processing_times():
     """Get sheet processing times for H08/H10 stations with filtering"""
@@ -2936,12 +3354,15 @@ def get_sheet_processing_times():
         
         # Don't force status='closed' here. Some deployments leave cycles open
         # (missing/failed close scan), which would otherwise make reports look empty.
-        where = ['station_code IN (?, ?)']
-        params = ['H08', 'H10']
+        where = []
+        params = []
         
         if station and station in ['H08', 'H10']:
-            where[0] = 'station_code = ?'
-            params[0] = station
+            where.append('station_code = ?')
+            params.append(station)
+        else:
+            where.append('station_code IN (?, ?)')
+            params.extend(['H08', 'H10'])
         
         if material:
             where.append('material LIKE ?')
@@ -2975,9 +3396,9 @@ def get_sheet_processing_times():
         # Get cycles
         query = f'''
             SELECT 
-                id, station_code, cycle_key, job_name, gcode, material, run_name,
+                id, station_code, cycle_key, job_name, gcode, 
                 start_time, end_time, duration_seconds,
-                operator_id, auto_closed, auto_closed_at_station,
+                operator_id, 
                 ROUND(duration_seconds / 60.0, 2) as duration_minutes
             FROM station_cycles 
             WHERE {where_sql}
@@ -2985,7 +3406,39 @@ def get_sheet_processing_times():
             LIMIT ? OFFSET ?
         '''
         cursor.execute(query, [*params, limit, offset])
-        cycles = [dict(row) for row in cursor.fetchall()]
+        rows = cursor.fetchall()
+        
+        # Check for optional columns (material, run_name, auto_closed)
+        cursor.execute("PRAGMA table_info(station_cycles)")
+        columns = {row['name'] for row in cursor.fetchall()}
+        
+        cycles = []
+        for r in rows:
+            c = dict(r)
+            if 'material' in columns:
+                # Re-fetch row with material if column exists
+                cursor.execute(f"SELECT material FROM station_cycles WHERE id = ?", (c['id'],))
+                c['material'] = cursor.fetchone()['material']
+            else:
+                c['material'] = None
+                
+            if 'run_name' in columns:
+                cursor.execute(f"SELECT run_name FROM station_cycles WHERE id = ?", (c['id'],))
+                c['run_name'] = cursor.fetchone()['run_name']
+            else:
+                c['run_name'] = None
+
+            if 'auto_closed' in columns:
+                cursor.execute(f"SELECT auto_closed, auto_closed_at_station FROM station_cycles WHERE id = ?", (c['id'],))
+                res = cursor.fetchone()
+                c['auto_closed'] = res['auto_closed']
+                c['auto_closed_at_station'] = res['auto_closed_at_station']
+            else:
+                c['auto_closed'] = 0
+                c['auto_closed_at_station'] = None
+                
+            cycles.append(c)
+            
         conn.close()
         
         return jsonify({
@@ -3011,6 +3464,7 @@ def get_assembly_times():
         
         operator_id = request.args.get('operator_id')
         station_display_name = request.args.get('station_display_name')
+        station_code = request.args.get('station') or request.args.get('station_code')
         cabinet_name = request.args.get('cabinet_name')
         cabinet_assembly = request.args.get('cabinet_assembly')
         job_name = request.args.get('job_name')
@@ -3024,8 +3478,15 @@ def get_assembly_times():
         
         # Don't force status='closed' here. Some deployments leave cycles open
         # (missing/failed close scan), which would otherwise make reports look empty.
-        where = ['station_code = ?']
-        params = ['Assembly']
+        where = []
+        params = []
+
+        if station_code:
+            where.append('station_code = ?')
+            params.append(station_code)
+        else:
+            where.append('station_code = ?')
+            params.append('Assembly')
 
         if station_display_name:
             where.append('station_display_name = ?')
@@ -3657,13 +4118,14 @@ def api_reports_mozaik_parts():
 
         try:
             cur.execute(f'''
-                SELECT sheet_id, material_name, material_thickness,
+                SELECT id, sheet_id, material_name, material_thickness,
                        gcode_filename, gcode_guess,
                        sheet_w_mm, sheet_l_mm,
                        part_w_mm, part_l_mm,
                        part_edge_band, part_band_temp_symbol,
                        part_no, part_name, part_shorthand_name, part_comment,
-                       cabinet_assembly, cabinet_name, room_name, opening_letter
+                       cabinet_assembly, cabinet_name, room_name, opening_letter,
+                       part_x_mm, part_y_mm, part_rot, geometry_json
                 FROM mozaik_expected_parts
                 {where}
                 ORDER BY sheet_id ASC, cabinet_assembly ASC, opening_letter ASC, part_no ASC
@@ -3672,7 +4134,7 @@ def api_reports_mozaik_parts():
         except Exception:
             # Backward compatibility (older DB schema)
             cur.execute(f'''
-                SELECT sheet_id, material_name, material_thickness,
+                SELECT id, sheet_id, material_name, material_thickness,
                        gcode_filename, gcode_guess,
                        part_no, part_name, part_shorthand_name, part_comment,
                        cabinet_assembly, cabinet_name, room_name, opening_letter
@@ -3689,6 +4151,7 @@ def api_reports_mozaik_parts():
             scanned = bool(gkey and (gkey in scan_set))
             grp = _mz_part_group(r['part_name'] or '', r['part_shorthand_name'] or '', r['part_comment'] or '')
             out.append({
+                'expected_part_id': r['id'],
                 'sheet_id': r['sheet_id'],
                 'material_name': r['material_name'],
                 'material_thickness': r['material_thickness'],
@@ -3703,6 +4166,11 @@ def api_reports_mozaik_parts():
                 'part_name': r['part_name'],
                 'part_shorthand_name': r['part_shorthand_name'],
                 'part_comment': r['part_comment'],
+                'part_x_mm': r['part_x_mm'] if 'part_x_mm' in r.keys() else None,
+                'part_y_mm': r['part_y_mm'] if 'part_y_mm' in r.keys() else None,
+                'part_rot_deg': r['part_rot'] if 'part_rot' in r.keys() else 0,
+                'geometry': r['geometry_json'] if 'geometry_json' in r.keys() else None,
+                'geometry_json': r['geometry_json'] if 'geometry_json' in r.keys() else None,
                 'cabinet_assembly': r['cabinet_assembly'],
                 'cabinet_name': r['cabinet_name'],
                 'room_name': r['room_name'],
@@ -4087,6 +4555,492 @@ def api_reports_job_time():
         })
     except Exception as e:
         logging.error(f"Error building job time report: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+def _parse_mixed_number_in(s: str):
+    """Parse numeric strings like '12', '12.5', '12 1/2', '1/4' as inches."""
+    t = (s or '').strip()
+    if not t:
+        return None
+    try:
+        return float(t)
+    except Exception:
+        pass
+    m = re.match(r'^\s*(\d+)\s+(\d+)\s*/\s*(\d+)\s*$', t)
+    if m:
+        try:
+            whole = float(m.group(1))
+            num = float(m.group(2))
+            den = float(m.group(3))
+            if den == 0:
+                return None
+            return whole + (num / den)
+        except Exception:
+            return None
+    m2 = re.match(r'^\s*(\d+)\s*/\s*(\d+)\s*$', t)
+    if m2:
+        try:
+            num = float(m2.group(1))
+            den = float(m2.group(2))
+            if den == 0:
+                return None
+            return num / den
+        except Exception:
+            return None
+    return None
+
+
+def _length_to_inches_best_effort(x):
+    """Heuristic inches converter: if numeric and >300 assume mm, else inches/fractions."""
+    s = ('' if x is None else str(x)).strip()
+    if not s:
+        return None
+    try:
+        # If it's a plain number and "large", assume mm.
+        if s.replace('.', '', 1).isdigit():
+            v = float(s)
+            if v > 300:
+                return v / 25.4
+    except Exception:
+        pass
+    v2 = _parse_mixed_number_in(s)
+    return v2
+
+
+_EDGE_RE = re.compile(r"^\s*([A-Za-z]{1,3})\s*[-_]?\s*([0-6])\s*,\s*([0-6])\s*,\s*([0-6])\s*,\s*([0-6])\s*$")
+
+
+def _parse_edge_code(x):
+    """Parse edge band code strings like 'P-1,0,0,0' -> {prefix, edges}."""
+    s = ('' if x is None else str(x)).strip()
+    if not s:
+        return None
+    s2 = re.sub(r"\s+", "", s)
+    m = _EDGE_RE.match(s2)
+    if not m:
+        return None
+    prefix = (m.group(1) or '').upper()
+    edges = [int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))]
+    return {'prefix': prefix, 'edges': edges}
+
+
+def _norm_edge_key(x):
+    parsed = _parse_edge_code(x)
+    if parsed:
+        return str(parsed.get('prefix') or '')[:120]
+    s = ('' if x is None else str(x)).strip()
+    if not s:
+        return ''
+    for sep in [',', '|', ';']:
+        if sep in s:
+            s = s.split(sep, 1)[0].strip()
+    return s[:120]
+
+
+def _part_dedupe_key(d: dict) -> str:
+    g = (str(d.get('gcode') or d.get('gcode_filename') or '')).strip()
+    p = (str(d.get('part_num') or d.get('part_number') or '')).strip()
+    if g and p:
+        return f"{g}::{p}"
+    j = (str(d.get('job_name') or '')).strip()
+    pn = (str(d.get('part_name') or '')).strip()
+    return f"{j}::{p or pn}"
+
+
+BUILTIN_CUSTOM_REPORTS_V1 = {
+    "edge_band_usage": {
+        "key": "edge_band_usage",
+        "name": "Edge band usage (band index + linear feet)",
+        "active": True,
+        "built_in": True,
+        "config": {
+            "kind": "aggregate",
+            "group_by": ["edge_prefix", "band_index"],
+            "filters": [{"field": "edge_material", "op": "exists"}],
+            "metrics": [
+                {"key": "parts", "op": "count_distinct_part"},
+                {"key": "linear_feet", "op": "sum_edge_lf"},
+            ],
+            "dedupe": True,
+            "exclude_band_indexes": [6],
+        },
+    },
+    "sand_throughput": {
+        "key": "sand_throughput",
+        "name": "Sanding throughput (parts + avg gap)",
+        "active": True,
+        "built_in": True,
+        "config": {
+            "kind": "aggregate",
+            "group_by": ["station_code", "station_display_name"],
+            "filters": [{"field": "station_code", "op": "contains", "value": "sand"}],
+            "metrics": [
+                {"key": "scans", "op": "count"},
+                {"key": "parts", "op": "count_distinct_part"},
+                {"key": "avg_gap_seconds", "op": "avg_gap_seconds"},
+            ],
+        },
+    },
+}
+
+
+def _load_custom_report_defs_v1() -> list:
+    """Load user-defined custom reports from DB settings (best effort)."""
+    if not get_setting:
+        return []
+    try:
+        raw = (get_setting('custom_report_defs_json', '[]') or '[]')
+        d = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(d, list):
+            return []
+        out = []
+        for r in d:
+            if not isinstance(r, dict):
+                continue
+            key = (r.get('key') or '').strip()
+            name = (r.get('name') or key).strip()
+            cfg = r.get('config') if isinstance(r.get('config'), dict) else {}
+            if not key:
+                continue
+            out.append({'key': key, 'name': name, 'active': (r.get('active') is not False), 'built_in': False, 'config': cfg})
+        return out[:200]
+    except Exception:
+        return []
+
+
+def _save_custom_report_defs_v1(items: list) -> None:
+    if not set_setting:
+        raise RuntimeError('settings not available')
+    safe = []
+    for r in (items or []):
+        if not isinstance(r, dict):
+            continue
+        key = (r.get('key') or '').strip()
+        if not key or key in BUILTIN_CUSTOM_REPORTS_V1:
+            continue
+        name = (r.get('name') or key).strip()[:120]
+        cfg = r.get('config') if isinstance(r.get('config'), dict) else {}
+        # Keep config to a safe subset
+        out_cfg = {
+            "kind": (str(cfg.get("kind") or "aggregate").strip().lower() or "aggregate"),
+            "group_by": list(cfg.get("group_by") or []),
+            "filters": list(cfg.get("filters") or []),
+            "metrics": list(cfg.get("metrics") or []),
+        }
+        if "dedupe" in cfg:
+            out_cfg["dedupe"] = bool(cfg.get("dedupe"))
+        if "exclude_band_indexes" in cfg and isinstance(cfg.get("exclude_band_indexes"), list):
+            out_cfg["exclude_band_indexes"] = [int(x) for x in cfg.get("exclude_band_indexes") if str(x).strip().lstrip("-").isdigit()]
+        safe.append({"key": key[:80], "name": name, "config": out_cfg, "active": (r.get("active") is not False)})
+    set_setting('custom_report_defs_json', json.dumps(safe))
+
+
+def _apply_filters_v1(row: dict, filters: list) -> bool:
+    for f in (filters or []):
+        if not isinstance(f, dict):
+            continue
+        field = (f.get("field") or "").strip()
+        op = (f.get("op") or "exists").strip().lower()
+        val = f.get("value")
+        rv = row.get(field)
+        rs = ("" if rv is None else str(rv))
+        if op == "exists":
+            if not rs.strip():
+                return False
+        elif op == "equals":
+            if (rs.strip().lower() != ("" if val is None else str(val)).strip().lower()):
+                return False
+        elif op == "contains":
+            if (("" if val is None else str(val)).strip().lower() not in rs.lower()):
+                return False
+        elif op == "startswith":
+            if not rs.lower().startswith(("" if val is None else str(val)).strip().lower()):
+                return False
+    return True
+
+
+@app.route('/api/reports/custom/defs', methods=['GET', 'POST'])
+def api_reports_custom_defs_v1():
+    """v1 custom report definitions (built-ins + optional saved)."""
+    if not get_db_connection:
+        return jsonify({'error': 'DB unavailable'}), 503
+
+    if request.method == 'GET':
+        saved = _load_custom_report_defs_v1()
+        out = [BUILTIN_CUSTOM_REPORTS_V1[k] for k in sorted(BUILTIN_CUSTOM_REPORTS_V1.keys())]
+        out.extend(saved)
+        return jsonify({'reports': out})
+
+    # POST (admin only)
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+    if not set_setting:
+        return jsonify({'error': 'Settings not available on this server'}), 501
+    body = request.get_json(silent=True) or {}
+    key = (body.get('key') or '').strip()
+    name = (body.get('name') or '').strip()
+    config = body.get('config') if isinstance(body.get('config'), dict) else None
+    if not key or not config:
+        return jsonify({'error': 'key + config required'}), 400
+    if key in BUILTIN_CUSTOM_REPORTS_V1:
+        return jsonify({'error': 'built-in report keys cannot be overwritten'}), 400
+    saved = _load_custom_report_defs_v1()
+    saved = [r for r in saved if (r.get('key') or '') != key]
+    saved.append({'key': key, 'name': (name or key), 'config': config, 'active': True})
+    try:
+        _save_custom_report_defs_v1(saved)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/reports/custom/defs/<path:key>', methods=['DELETE'])
+def api_reports_custom_defs_delete_v1(key: str):
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+    kk = (key or '').strip()
+    if kk in BUILTIN_CUSTOM_REPORTS_V1:
+        return jsonify({'error': 'built-in report keys cannot be deleted'}), 400
+    try:
+        saved = _load_custom_report_defs_v1()
+        before = len(saved)
+        saved2 = [r for r in saved if (r.get('key') or '') != kk]
+        _save_custom_report_defs_v1(saved2)
+        return jsonify({'success': True, 'deleted': (before - len(saved2))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/reports/custom/run')
+def api_reports_custom_run_v1():
+    """Run a custom report against v1 scans (single-shop)."""
+    try:
+        if not get_db_connection:
+            return jsonify({'error': 'DB unavailable'}), 503
+        key = (request.args.get('key') or '').strip()
+        if not key:
+            return jsonify({'error': 'key required'}), 400
+
+        # Find report definition
+        rd = BUILTIN_CUSTOM_REPORTS_V1.get(key)
+        if not rd:
+            for r in _load_custom_report_defs_v1():
+                if (r.get('key') or '').strip() == key:
+                    rd = r
+                    break
+        if not rd:
+            return jsonify({'error': 'report not found'}), 404
+
+        cfg = rd.get('config') if isinstance(rd.get('config'), dict) else {}
+        group_by = list(cfg.get('group_by') or [])
+        filters = list(cfg.get('filters') or [])
+        metrics = list(cfg.get('metrics') or [])
+        dedupe = bool(cfg.get('dedupe', False))
+        exclude_band = set()
+        try:
+            xbi = cfg.get('exclude_band_indexes')
+            if isinstance(xbi, list):
+                exclude_band = {int(x) for x in xbi if str(x).strip().lstrip('-').isdigit()}
+        except Exception:
+            exclude_band = set()
+        if key == 'edge_band_usage' and not exclude_band:
+            exclude_band = {6}
+
+        # Optional quick filters
+        job_q = (request.args.get('job') or '').strip().lower()
+        edge_pref_q = (request.args.get('edge_prefix') or '').strip().upper()
+
+        date_from = (request.args.get('date_from') or '').strip()
+        date_to = (request.args.get('date_to') or '').strip()
+        # Default to today
+        if not date_from and not date_to:
+            d = datetime.now().strftime('%Y-%m-%d')
+            date_from = d
+            date_to = d
+        try:
+            dt_from = datetime.strptime(date_from, '%Y-%m-%d') if date_from else None
+            dt_to = datetime.strptime(date_to, '%Y-%m-%d') if date_to else None
+        except Exception:
+            return jsonify({'error': 'Invalid date_from/date_to. Expected YYYY-MM-DD.'}), 400
+        if not dt_from:
+            dt_from = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        if not dt_to:
+            dt_to = dt_from
+        start_str = dt_from.strftime('%Y-%m-%d 00:00:00')
+        end_str = dt_to.strftime('%Y-%m-%d 23:59:59')
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT timestamp, station_code, station_display_name, job_name, run_name, material,
+                   part_name, part_num, part_length, part_width, edge_material, gcode,
+                   cabinet_assembly, cabinet_name, opening_letter, operator_id
+            FROM scans
+            WHERE timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC
+        ''', (start_str, end_str))
+        rows = [dict(r) for r in (cur.fetchall() or [])]
+        conn.close()
+
+        data_rows = []
+        for d in rows:
+            if job_q and job_q not in (str(d.get('job_name') or '')).lower():
+                continue
+            if edge_pref_q:
+                ec = _parse_edge_code(d.get('edge_material'))
+                pref = (ec.get('prefix') if ec else _norm_edge_key(d.get('edge_material'))).upper()
+                if pref != edge_pref_q:
+                    continue
+            # enrich edge fields
+            d['edge_key'] = _norm_edge_key(d.get('edge_material'))
+            ec = _parse_edge_code(d.get('edge_material'))
+            if ec:
+                d['edge_prefix'] = ec.get('prefix')
+                d['_edge_edges'] = ec.get('edges')
+            else:
+                d['edge_prefix'] = d.get('edge_key')
+                d['_edge_edges'] = None
+            if _apply_filters_v1(d, filters):
+                data_rows.append(d)
+
+        # Aggregate engine
+        agg = {}
+        seen_parts = set()
+
+        def _ensure_group(gk, d0):
+            if gk not in agg:
+                agg[gk] = {k: d0.get(k) for k in group_by}
+                for m in metrics:
+                    agg[gk][m.get('key')] = 0
+                agg[gk]['__seen_parts'] = set()
+                agg[gk]['__last_ts'] = None
+                agg[gk]['__gap_sum'] = 0.0
+                agg[gk]['__gap_n'] = 0
+
+        def _count_distinct(gk, d0, metric_key):
+            sp = agg[gk].get('__seen_parts')
+            if not isinstance(sp, set):
+                sp = set()
+                agg[gk]['__seen_parts'] = sp
+            dk = _part_dedupe_key(d0)
+            if dk and dk not in sp:
+                sp.add(dk)
+                agg[gk][metric_key] = int(agg[gk].get(metric_key) or 0) + 1
+
+        def _update_gap(gk, ts):
+            last = agg[gk].get('__last_ts')
+            if last and isinstance(last, datetime) and isinstance(ts, datetime):
+                dt = (ts - last).total_seconds()
+                if dt >= 0:
+                    agg[gk]['__gap_sum'] = float(agg[gk].get('__gap_sum') or 0.0) + float(dt)
+                    agg[gk]['__gap_n'] = int(agg[gk].get('__gap_n') or 0) + 1
+            agg[gk]['__last_ts'] = ts
+
+        for d in data_rows:
+            # Parse timestamp for gap metrics
+            ts = _parse_scan_ts(d.get('timestamp'))
+
+            edges = d.get('_edge_edges')
+            if key == 'edge_band_usage':
+                if isinstance(edges, list) and len(edges) == 4:
+                    # Only dedupe if there is at least one countable band
+                    has_countable = False
+                    try:
+                        for bi0 in edges:
+                            bi = int(bi0 or 0)
+                            if bi > 0 and bi not in exclude_band:
+                                has_countable = True
+                                break
+                    except Exception:
+                        has_countable = False
+                    if not has_countable:
+                        continue
+                    if dedupe:
+                        pk = _part_dedupe_key(d)
+                        if pk and pk in seen_parts:
+                            continue
+                        if pk:
+                            seen_parts.add(pk)
+                    L_in = _length_to_inches_best_effort(d.get('part_length')) or 0.0
+                    W_in = _length_to_inches_best_effort(d.get('part_width')) or 0.0
+                    side_in = [L_in, W_in, L_in, W_in]
+                    prefix = (d.get('edge_prefix') or '')
+                    for side_idx, band_idx in enumerate(edges):
+                        bi = int(band_idx or 0)
+                        if bi <= 0 or bi in exclude_band:
+                            continue
+                        d2 = dict(d)
+                        d2['edge_prefix'] = prefix
+                        d2['band_index'] = bi
+                        inches = float(side_in[side_idx] or 0.0)
+                        lf_add = (inches / 12.0) if inches > 0 else 0.0
+                        gk = tuple(d2.get(k) for k in group_by) if group_by else tuple()
+                        _ensure_group(gk, d2)
+                        for m in metrics:
+                            mk = str(m.get('key'))
+                            op = (m.get('op') or '').strip().lower()
+                            if op == 'count':
+                                agg[gk][mk] = int(agg[gk].get(mk) or 0) + 1
+                            elif op == 'count_distinct_part':
+                                _count_distinct(gk, d2, mk)
+                            elif op in ('sum_edge_lf', 'sum_length_ft'):
+                                agg[gk][mk] = float(agg[gk].get(mk) or 0.0) + float(lf_add)
+                    continue
+                # fallback (rare)
+                d2 = dict(d)
+                d2['band_index'] = None
+                gk = tuple(d2.get(k) for k in group_by) if group_by else tuple()
+                _ensure_group(gk, d2)
+                for m in metrics:
+                    mk = str(m.get('key'))
+                    op = (m.get('op') or '').strip().lower()
+                    if op == 'count_distinct_part':
+                        _count_distinct(gk, d2, mk)
+                continue
+
+            # generic aggregation (sand etc)
+            gk = tuple(d.get(k) for k in group_by) if group_by else tuple()
+            _ensure_group(gk, d)
+            for m in metrics:
+                mk = str(m.get('key'))
+                op = (m.get('op') or '').strip().lower()
+                if op == 'count':
+                    agg[gk][mk] = int(agg[gk].get(mk) or 0) + 1
+                elif op == 'count_distinct_part':
+                    _count_distinct(gk, d, mk)
+                elif op == 'avg_gap_seconds':
+                    if isinstance(ts, datetime):
+                        _update_gap(gk, ts)
+
+        out_rows = []
+        for v in agg.values():
+            v.pop('__seen_parts', None)
+            last_ts = v.pop('__last_ts', None)
+            gap_sum = float(v.pop('__gap_sum', 0.0) or 0.0)
+            gap_n = int(v.pop('__gap_n', 0) or 0)
+            # finalize avg_gap_seconds if present
+            if 'avg_gap_seconds' in v:
+                v['avg_gap_seconds'] = round((gap_sum / gap_n), 1) if gap_n > 0 else None
+            if 'linear_feet' in v and isinstance(v.get('linear_feet'), (int, float)):
+                try:
+                    v['linear_feet'] = round(float(v.get('linear_feet') or 0.0), 2)
+                except Exception:
+                    pass
+            out_rows.append(v)
+
+        if group_by:
+            out_rows.sort(key=lambda x: (str(x.get(group_by[0]) or '')))
+        columns = [*group_by, *[str(m.get('key')) for m in metrics]]
+        return jsonify({
+            'report': {'key': rd.get('key'), 'name': rd.get('name')},
+            'columns': columns,
+            'rows': out_rows,
+            'row_count': len(out_rows),
+            'source_rows': len(data_rows),
+        })
+    except Exception as e:
+        logging.error(f"Error running custom report: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

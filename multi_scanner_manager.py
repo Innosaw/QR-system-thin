@@ -676,14 +676,23 @@ class QRScannerForStation(QRScanner):
         """Remove station prefix from scan data if present"""
         if not scan_data:
             return scan_data
+
+        def _detect_delim(t: str) -> str:
+            tt = t or ""
+            if tt.count("|") >= 2:
+                return "|"
+            if tt.count("^") >= 2:
+                return "^"
+            return ","
         
         # Check if scan starts with a known station prefix
-        parts = scan_data.split(',')
+        delim = _detect_delim(scan_data)
+        parts = scan_data.split(delim)
         if len(parts) > 1:
             first_part = parts[0].strip()
             if first_part in self.station_prefixes:
                 # Remove the station prefix, keep the rest
-                cleaned = ','.join(parts[1:]).strip()
+                cleaned = delim.join(parts[1:]).strip()
                 logging.debug(f"📝 Stripped station prefix '{first_part}' from scan: {scan_data} → {cleaned}")
                 return cleaned
         

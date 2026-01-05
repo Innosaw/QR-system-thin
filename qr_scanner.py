@@ -178,11 +178,28 @@ class QRDataParser:
             "Wrap": "Station_9_Wrapping", 
             "Ship": "Station_10_Shipping"
         }
+
+    @staticmethod
+    def _detect_delimiter(scan_text: str) -> str:
+        """
+        Auto-detect the delimiter used in label payloads.
+
+        Important: Newer labels may use '|' but can still contain commas inside fields
+        (example: trailing values like 'P-2,0,0,0'). We prefer '|' (or '^') when it
+        appears to be the primary delimiter.
+        """
+        t = scan_text or ""
+        if t.count("|") >= 2:
+            return "|"
+        if t.count("^") >= 2:
+            return "^"
+        return ","
     
     def parse_scan_data(self, scan_text, operator=""):
         """Parse QR scan data into structured format"""
         try:
-            parts = [part.strip() for part in scan_text.split(",")]
+            delim = self._detect_delimiter(scan_text)
+            parts = [part.strip() for part in scan_text.split(delim)]
             timestamp = datetime.now()
             
             if len(parts) < 1:
@@ -212,6 +229,16 @@ class QRDataParser:
                 "parts": parts,  # Data parts (station prefix already removed if present)
                 "parsed_fields": {}
             }
+
+            # First: apply admin-configured CSV field mapping (v2-style "barcode mapping").
+            # If it yields anything, prefer it and skip legacy parsing.
+            try:
+                mapped = _apply_scan_defaults_csv_mapping(parts, station_code=station)
+                if mapped:
+                    parsed_data["parsed_fields"] = mapped
+                    return parsed_data
+            except Exception:
+                pass
             
             # Station-specific parsing (parts already have station prefix removed if present)
             #
@@ -301,6 +328,95 @@ class QRDataParser:
         except Exception as e:
             logging.error(f"Parse error for '{scan_text}': {e}")
             raise
+
+
+_SCAN_DEFAULTS_CACHE = {"ts": 0.0, "val": {}}
+
+
+def _load_scan_defaults() -> dict:
+    """Load v1 scan defaults from DB settings (cached)."""
+    now = time.time()
+    if (now - float(_SCAN_DEFAULTS_CACHE.get("ts", 0.0))) < 5.0:
+        v = _SCAN_DEFAULTS_CACHE.get("val")
+        return v if isinstance(v, dict) else {}
+    out = {}
+    try:
+        from database_schema import get_setting  # type: ignore
+        raw = (get_setting("scan_defaults_json", "{}") or "{}")
+        out = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(out, dict):
+            out = {}
+    except Exception:
+        out = {}
+    _SCAN_DEFAULTS_CACHE["ts"] = now
+    _SCAN_DEFAULTS_CACHE["val"] = out
+    return out
+
+
+def _meaning_to_field_key(m: str) -> str:
+    """Map v2 meaning labels -> v1 parsed_fields keys."""
+    m = (m or "").strip()
+    mapping = {
+        "Gcode_Filename": "gcode",
+        "Part_Num": "part_num",
+        "Job_Name": "job_name",
+        "Cab_Name": "cabinet_name",
+        "Cab_Assembly_Num": "cabinet_assembly",
+        "Part_Name": "part_name",
+        "Part_Material": "material",
+        "Run_Name": "run_name",
+        "Opening_letter": "opening_letter",
+        "Part_Length": "part_length",
+        "Part_Width": "part_width",
+        "Edgeband_Info": "edge_material",
+        "Custom_1": "custom_1",
+        "Custom_2": "custom_2",
+        "Custom_3": "custom_3",
+    }
+    return mapping.get(m, "")
+
+
+def _apply_scan_defaults_csv_mapping(parts: list, station_code: str) -> dict:
+    """Apply scan_defaults csv_fallback mapping to already-split parts (station prefix removed)."""
+    if not isinstance(parts, list) or not parts:
+        return {}
+
+    sd = _load_scan_defaults()
+    cfg = None
+
+    # Station override wins
+    try:
+        by_station = sd.get("by_station")
+        if isinstance(by_station, dict) and station_code and station_code in by_station:
+            st = by_station.get(station_code)
+            if isinstance(st, dict) and isinstance(st.get("csv_fallback"), dict):
+                cfg = st.get("csv_fallback")
+    except Exception:
+        cfg = None
+
+    if not cfg:
+        cfg0 = sd.get("csv_fallback")
+        cfg = cfg0 if isinstance(cfg0, dict) else None
+
+    if not isinstance(cfg, dict):
+        return {}
+
+    columns = cfg.get("columns") or []
+    if not isinstance(columns, list) or not columns:
+        return {}
+
+    out = {}
+    for i, meaning in enumerate(columns):
+        if i >= len(parts):
+            break
+        key = _meaning_to_field_key(str(meaning))
+        if not key:
+            continue
+        val = (parts[i] or "").strip()
+        if val == "":
+            continue
+        out[key] = val
+    return out
 
 def _camera_deps_required():
     global cv2, pyzbar, CAMERA_DEPS_AVAILABLE
@@ -852,6 +968,8 @@ class QRScanner:
         
         self.current_operator = ""
         self.current_operator_date = ""
+        self._operator_barcode_map_cache = {}
+        self._operator_barcode_map_cache_ts = 0.0
         self._load_operator_state()
         try:
             from database_schema import DB_PATH as _DBP
@@ -1304,6 +1422,23 @@ class QRScanner:
     
     def _try_handle_operator_scan(self, scan_text):
         text = scan_text.strip()
+
+        # Operator badge barcode mapping (admin-configurable)
+        try:
+            mapped = self._lookup_operator_from_barcode(text)
+            if mapped:
+                operator_value = str(mapped).strip()
+                if len(operator_value) <= 4 and operator_value.isalpha():
+                    operator_value = operator_value.upper()
+                self.current_operator = operator_value
+                self.current_operator_date = datetime.now().strftime('%Y-%m-%d')
+                self._persist_operator_state()
+                logging.info("Operator logged in (barcode map): %s", operator_value)
+                self.hardware.beep_success()
+                return True
+        except Exception:
+            pass
+
         for pattern in self.OPERATOR_PATTERNS:
             match = pattern.search(text)
             if not match:
@@ -1321,6 +1456,41 @@ class QRScanner:
             self.hardware.beep_success()
             return True
         return False
+
+    def _load_operator_barcode_map(self) -> dict:
+        """Load operator barcode -> operator_id map from DB settings (cached)."""
+        now = time.time()
+        if (now - float(getattr(self, '_operator_barcode_map_cache_ts', 0.0))) < 10.0:
+            return getattr(self, '_operator_barcode_map_cache', {}) or {}
+        mp = {}
+        try:
+            from database_schema import get_setting  # type: ignore
+            raw = (get_setting('operator_barcode_map_json', '{}') or '{}')
+            import json as _json
+            parsed = _json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(parsed, dict):
+                mp = {str(k).strip(): str(v).strip() for k, v in parsed.items() if str(k).strip() and str(v).strip()}
+        except Exception:
+            mp = {}
+        self._operator_barcode_map_cache = mp
+        self._operator_barcode_map_cache_ts = now
+        return mp
+
+    def _lookup_operator_from_barcode(self, scan_text: str):
+        """Return operator_id if scan_text matches a configured operator barcode."""
+        t = (scan_text or '').strip()
+        if not t:
+            return None
+        mp = self._load_operator_barcode_map()
+        # exact match
+        if t in mp:
+            return mp.get(t)
+        # common scanner trailing/leading junk: also try upper/lower variants
+        if t.upper() in mp:
+            return mp.get(t.upper())
+        if t.lower() in mp:
+            return mp.get(t.lower())
+        return None
 
     def _try_handle_bin_scan(self, scan_text):
         match = self.BIN_PATTERN.match(scan_text.strip())
@@ -1351,11 +1521,12 @@ class QRScanner:
         text = scan_text.strip()
         # Some scanners prefix the station code (e.g., "Edge,recut"). Strip known prefixes for marker matching.
         try:
-            parts = [p.strip() for p in text.split(',')]
+            delim = QRDataParser._detect_delimiter(text)
+            parts = [p.strip() for p in text.split(delim)]
             station_prefixes = {"H08", "H10", "QC", "Edge", "Dowel", "Sort", "Pull", "Assembly", "Wrap", "Ship"}
             if len(parts) >= 2 and parts[0] in station_prefixes:
                 # For marker scans, we only care about the remaining payload
-                text = ','.join(parts[1:]).strip()
+                text = delim.join(parts[1:]).strip()
         except Exception:
             pass
 

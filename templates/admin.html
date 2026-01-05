@@ -5,8 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - Manufacturing Dashboard</title>
     <link rel="stylesheet" href="/static/common.css?v=20251222">
+    <script>
+        // Prevent a flash of the raw sections before the sidebar layout is initialized.
+        try {
+            document.documentElement.classList.add('admin_nav_boot');
+            window.setTimeout(() => {
+                try { document.documentElement.classList.remove('admin_nav_boot'); } catch (e) {}
+            }, 1500);
+        } catch (e) {}
+    </script>
     <style>
         /* Page-specific styles only - common styles are in common.css */
+        html.admin_nav_boot .container { visibility: hidden; }
         
         .row {
             display: flex;
@@ -36,25 +46,125 @@
         .msg.err {
             color: #991b1b;
         }
+
+        /* Collapsible cards */
+        .card .card_header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .card .card_header h2 { margin: 0; }
+        .card .card_toggle {
+            border: 1px solid #e5e7eb;
+            background: #f8fafc;
+            color: #0d2137;
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-weight: 900;
+            cursor: pointer;
+        }
+        .card.collapsed .card_body { display: none; }
+        .card.collapsed .card_toggle { background: #111827; color: #fff; border-color: #111827; }
+
+        /* Admin: sidebar sections */
+        .admin_layout {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 14px;
+            align-items: start;
+        }
+        .admin_sidebar {
+            position: sticky;
+            top: 12px;
+        }
+        .admin_sidebar .card { margin: 0; }
+        .admin_nav_btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            text-align: left;
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            color: #0d2137;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-weight: 900;
+            cursor: pointer;
+        }
+        .admin_nav_btn:hover { background: #f8fafc; }
+        .admin_nav_btn.active { background: #111827; color: #fff; border-color: #111827; }
+        .admin_nav_list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+        .admin_section { display: none; }
+        .admin_section.active { display: block; }
+        .admin_section .card { margin-top: 0; }
+        .admin_select_wrap { display: none; margin-top: 10px; }
+        .admin_select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #e5e7eb; font-weight: 800; }
+        @media (max-width: 980px) {
+            .admin_layout { grid-template-columns: 1fr; }
+            .admin_sidebar { position: static; }
+            .admin_nav_list { display: none; }
+            .admin_select_wrap { display: block; }
+        }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>🛠️ Admin</h1>
         <div class="subtitle">Operators, backups, and safe maintenance tools</div>
-        <div class="nav">
-            <a href="/">Dashboard</a>
-            <a href="/reports">Reports</a>
-            <a href="/inventory">Inventory</a>
-            <a href="/maintenance">Maintenance</a>
-            <a href="/recuts">Recuts</a>
-            <a href="/tools">Tools</a>
-            <a href="/scans">Scan Log</a>
-            <a class="active" href="/admin">Admin</a>
-            <a class="ext-link" data-port="5000" data-path="/" href="http://localhost:5000">Bin Manager</a>
-            <a class="ext-link" data-port="5007" data-path="/" href="http://localhost:5007">API</a>
+        <div class="nav_primary">
+            <a class="nav_btn" href="/">Dashboard</a>
+            <a class="nav_btn ext-link" data-port="5000" data-path="/" href="/bins">Bins</a>
+            <a class="nav_btn" href="/reports">Reports</a>
+            <a class="nav_btn active" href="/admin">Admin</a>
+            <a class="nav_btn" href="/help">Help</a>
+            <a class="nav_btn" href="https://v2.innosaw.work/" target="_blank" rel="noopener noreferrer">License this software</a>
+            <span class="nav_spacer"></span>
+            <button id="auth_btn" class="nav_btn" type="button" onclick="innosawAuthClick()">Login</button>
         </div>
     </div>
+    <div class="nav_secondary" style="margin: 0 20px 0 20px;">
+        <a class="nav_btn active" href="/admin">Admin</a>
+        <a class="nav_btn" href="/scans">Scan Log</a>
+        <a class="nav_btn" href="/mobile">Mobile Scan</a>
+        <a class="nav_btn" href="/reports">Reports</a>
+        <a class="nav_btn" href="/raw_scans">Raw Scans</a>
+    </div>
+    <script>
+        // v1 local auth helper (works even when auth is disabled)
+        window.__innosawAuthRole = 'viewer';
+        async function innosawRefreshAuthBtn() {
+            const btn = document.getElementById('auth_btn');
+            if (!btn) return;
+            try {
+                const res = await fetch('/api/auth/status');
+                const data = await res.json();
+                window.__innosawAuthRole = (data && data.role) ? data.role : 'viewer';
+                const enabled = !!(data && data.enabled);
+                if (!enabled) {
+                    btn.style.display = 'none';
+                    return;
+                }
+                btn.style.display = 'inline-flex';
+                btn.textContent = (window.__innosawAuthRole && window.__innosawAuthRole !== 'viewer') ? 'Logout' : 'Login';
+            } catch (e) {
+                btn.style.display = 'none';
+            }
+        }
+        async function innosawAuthClick() {
+            try {
+                if (window.__innosawAuthRole && window.__innosawAuthRole !== 'viewer') {
+                    await fetch('/api/auth/logout', { method: 'POST' });
+                    window.location.href = '/';
+                    return;
+                }
+            } catch (e) {}
+            window.location.href = '/login';
+        }
+        document.addEventListener('DOMContentLoaded', innosawRefreshAuthBtn);
+    </script>
 
     <div class="container">
         <div class="card">
@@ -88,6 +198,113 @@
                     </tbody>
                 </table>
             </div>
+        </div>
+
+        <div class="card">
+            <h2>Operator Badge Barcodes</h2>
+            <div class="subtitle" style="margin-bottom: 10px;">
+                Map a scanned badge barcode to an Operator ID. After saving, scanning that barcode will set the current operator for today.
+            </div>
+            <div class="row">
+                <div class="field" style="min-width: 320px;">
+                    <label>Badge Barcode (exact text)</label>
+                    <input id="op_barcode" placeholder="Scan badge here (or paste the barcode value)">
+                </div>
+                <div class="field" style="width: 160px;">
+                    <label>Operator ID</label>
+                    <input id="op_barcode_operator" placeholder="JM">
+                </div>
+                <button class="btn btn-primary" onclick="saveOperatorBarcode()">Save</button>
+                <button class="btn btn-secondary" onclick="loadOperatorBarcodes()">Refresh</button>
+            </div>
+            <div class="msg" id="op_barcode_msg"></div>
+            <div style="margin-top: 12px; overflow:auto; max-height: 280px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="min-width: 360px;">Barcode</th>
+                            <th style="min-width: 160px;">Operator ID</th>
+                            <th style="width: 120px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="op_barcode_tbody">
+                        <tr><td colspan="3">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Assembly Group Rules</h2>
+            <div class="subtitle" style="margin-bottom: 10px;">
+                Controls how Assembly Times groups scans into <b>Case / Drawer / Doors / QC</b> (and other labels).
+                Rules are stored in the DB, so you can adjust them without changing code.
+            </div>
+
+            <div class="row">
+                <button class="btn btn-secondary" onclick="assemblyRulesLoad()">Load saved</button>
+                <button class="btn btn-secondary" onclick="assemblyRulesSetDefault()">Load defaults</button>
+                <button class="btn btn-primary" onclick="assemblyRulesSave()">Save</button>
+                <button class="btn btn-secondary" type="button" onclick="assemblyRulesToggleAdvanced()">Advanced (JSON)</button>
+            </div>
+
+            <div class="row" style="margin-top: 10px;">
+                <div class="field" style="min-width: 240px;">
+                    <label>Default group</label>
+                    <input id="assembly_rules_default" placeholder="Case">
+                    <div class="subtitle" style="margin-top:6px;">Used if no rule matches.</div>
+                </div>
+                <div class="field" style="flex: 1; min-width: 320px;">
+                    <label>Add rule</label>
+                    <button class="btn btn-secondary" type="button" onclick="assemblyRulesAddRow()">Add rule row</button>
+                    <div class="subtitle" style="margin-top:6px;">Rules are evaluated top → bottom. First match wins.</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 10px; overflow:auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:70px;">Order</th>
+                            <th style="min-width: 180px;">Group label</th>
+                            <th style="min-width: 220px;">Match</th>
+                            <th style="min-width: 340px;">Values</th>
+                            <th style="width: 220px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="assembly_rules_tbody">
+                        <tr><td colspan="5"><em>Load saved or defaults…</em></td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="subtitle" style="margin-top: 6px;">
+                Values are comma-separated (example: <code>door, doors</code>). Match is case-insensitive.
+            </div>
+
+            <div class="row" style="margin-top: 12px;">
+                <div class="field" style="min-width: 260px;">
+                    <label>Test: Station display name</label>
+                    <input id="assembly_rules_test_station_display" placeholder="Assembly 1 / QC / etc">
+                </div>
+                <div class="field" style="min-width: 360px; flex: 1;">
+                    <label>Test: Part name</label>
+                    <input id="assembly_rules_test_part" placeholder="e.g. DRW Side (L), Door Left, *Insert, etc">
+                </div>
+                <button class="btn btn-secondary" onclick="assemblyRulesTest()">Test</button>
+            </div>
+
+            <div id="assembly_rules_json_wrap" style="display:none; margin-top: 10px;">
+                <div class="field">
+                    <label>Advanced: Rules JSON</label>
+                    <textarea id="assembly_rules_json" style="width:100%; min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 12px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 10px;"></textarea>
+                    <div class="subtitle" style="margin-top:6px;">
+                        Advanced keys supported: <code>part_name_regex</code>, <code>station_display_name_regex</code>, <code>station_code_equals</code>, <code>opening_letter_equals</code>, etc.
+                    </div>
+                </div>
+            </div>
+
+            <div class="msg" id="assembly_rules_msg"></div>
         </div>
 
         <div class="card">
@@ -173,6 +390,73 @@
                     </tbody>
                 </table>
             </div>
+        </div>
+
+        <div class="card">
+            <h2>Bin Dashboard Monitor Settings</h2>
+            <div class="subtitle" style="margin-bottom: 10px;">
+                Configure the layout for the static bin monitor page (wall-mounted monitors).
+            </div>
+            <div class="row" style="margin-top:10px; gap:16px;">
+                <div class="field">
+                    <label>Total Bins</label>
+                    <input type="number" id="admin_bin_count" style="width:100px;" value="40">
+                </div>
+                <div class="field">
+                    <label>Grid Columns</label>
+                    <input type="number" id="admin_bin_cols" style="width:100px;" value="10">
+                </div>
+                <div class="field">
+                    <label>Grid Rows</label>
+                    <input type="number" id="admin_bin_rows" style="width:100px;" value="4">
+                </div>
+                <div class="field">
+                    <label>Display Mode</label>
+                    <select id="admin_bin_mode" style="min-width:160px;">
+                        <option value="standard">Standard (Visual + Parts)</option>
+                        <option value="compact">Compact (No Parts)</option>
+                        <option value="cabinet_only">Cabinet Number Only</option>
+                        <option value="simple_table">Simple Table</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row" style="margin-top:10px; gap:16px;">
+                <div class="field">
+                    <label>Bin # Size (px)</label>
+                    <input type="number" id="admin_bin_num_size" style="width:100px;" value="15">
+                </div>
+                <div class="field">
+                    <label>Job/Cab Size (px)</label>
+                    <input type="number" id="admin_bin_content_size" style="width:100px;" value="16">
+                </div>
+                <div class="field">
+                    <label>Status Size (px)</label>
+                    <input type="number" id="admin_bin_status_size" style="width:100px;" value="11">
+                </div>
+            </div>
+            <div class="row" style="margin-top:10px; gap:16px; align-items: flex-end;">
+                <div class="field">
+                    <label>Ready BG</label>
+                    <input type="color" id="admin_bin_color_ready" value="#059669" style="width:60px; height:36px; padding:2px;">
+                </div>
+                <div class="field">
+                    <label>Partial BG</label>
+                    <input type="color" id="admin_bin_color_partial" value="#2563eb" style="width:60px; height:36px; padding:2px;">
+                </div>
+                <div class="field">
+                    <label>Mixed BG</label>
+                    <input type="color" id="admin_bin_color_mixed" value="#d97706" style="width:60px; height:36px; padding:2px;">
+                </div>
+                <div class="field">
+                    <label>Empty BG</label>
+                    <input type="color" id="admin_bin_color_empty" value="#2d2d2d" style="width:60px; height:36px; padding:2px;">
+                </div>
+            </div>
+            <div class="row" style="margin-top: 15px;">
+                <button class="btn btn-primary" onclick="binConfigSave()">Save Settings</button>
+                <button class="btn btn-secondary" onclick="binConfigLoad()">Refresh</button>
+            </div>
+            <div class="msg" id="bin_config_msg"></div>
         </div>
 
         <div class="card">
@@ -274,10 +558,11 @@
         </div>
 
         <div class="card">
-            <h2>USB Dongle Mapping</h2>
+            <h2>Stations / Barcode mapping</h2>
             <div class="row">
                 <button class="btn btn-primary" onclick="detectDongles()">Detect USB Dongles</button>
                 <button class="btn btn-secondary" onclick="loadStations()">Refresh Stations</button>
+                <button class="btn btn-secondary" onclick="openScanMappingWizard()">Barcode mapping…</button>
             </div>
             <div class="msg" id="dongle_msg"></div>
             <div class="row" style="margin-top: 12px; align-items: end; flex-wrap: wrap; gap: 10px;">
@@ -322,6 +607,69 @@
             </div>
         </div>
 
+        <!-- Barcode / CSV field mapping wizard (like v2 Stations → Barcode mapping) -->
+        <div id="scanmap_wrap" class="modal-backdrop" style="display:none;">
+            <div class="modal" style="max-width: 1100px; width: min(1100px, calc(100vw - 40px)); max-height: min(85vh, 900px);">
+                <div class="modal-header">
+                    <h2 style="margin:0;">Barcode mapping</h2>
+                    <button class="btn btn-secondary" type="button" onclick="closeScanMappingWizard()">Close</button>
+                </div>
+                <div class="modal-body">
+                    <div class="subtitle" style="margin-bottom: 10px;">
+                        Paste a raw scan. We’ll split it and you can map columns to fields (Job, Cabinet, Part, Material, etc.).
+                    </div>
+
+                    <div class="row" style="align-items:end; flex-wrap: wrap;">
+                        <div class="field" style="flex:2; min-width: 320px;">
+                            <label>Raw scan text</label>
+                            <input id="scanmap_raw" placeholder="Paste raw scan here…" onkeydown="scanmapMaybeEnter(event)">
+                        </div>
+                        <div class="field" style="width: 160px;">
+                            <label>Delimiter</label>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <label style="display:flex; gap:6px; align-items:center; margin:0; font-size: 12px;">
+                                    <input id="scanmap_delim_auto" type="checkbox" checked onchange="scanmapUpdateDelimMode()">
+                                    Auto
+                                </label>
+                                <input id="scanmap_delim" style="width: 52px;" value="" placeholder="|">
+                            </div>
+                            <div id="scanmap_delim_hint" class="subtitle" style="margin-top:6px; font-size: 12px;"></div>
+                        </div>
+                        <div class="field" style="width: 180px;">
+                            <button class="btn btn-primary" type="button" onclick="scanmapSplit()">Split</button>
+                        </div>
+                    </div>
+
+                    <div class="row" style="margin-top:10px; gap:10px; flex-wrap: wrap;">
+                        <button class="btn btn-secondary" type="button" onclick="scanmapAssignMozaikStandard()">Auto-map Mozaik standard</button>
+                        <button class="btn btn-secondary" type="button" onclick="scanmapLoadCurrent()">Load current mapping</button>
+                        <button class="btn btn-secondary" type="button" onclick="scanmapClear()">Clear mapping</button>
+                        <span class="subtitle" style="margin-left:auto;">Apply:</span>
+                        <select id="scanmap_apply_target" style="padding: 8px 10px; border:1px solid #ddd; border-radius:6px;">
+                            <option value="default" selected>Default (all stations)</option>
+                        </select>
+                        <button class="btn btn-primary" type="button" onclick="scanmapSave()">Save</button>
+                    </div>
+                    <div class="msg" id="scanmap_msg" style="margin-top:10px;"></div>
+
+                    <div style="margin-top: 10px; overflow:auto; max-height: 52vh;">
+                        <table style="width:100%;">
+                            <thead>
+                                <tr>
+                                    <th style="width:60px;">#</th>
+                                    <th>Value</th>
+                                    <th style="width: 260px;">Meaning</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scanmap_tbody">
+                                <tr><td colspan="3"><em>Paste a scan and click Split…</em></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="card">
             <h2>Admin Password</h2>
             <div class="row">
@@ -358,6 +706,278 @@
 
     <script>
         let detectedDonglesCache = [];
+
+        function assemblyRulesDefaultObject() {
+            return {
+                version: 1,
+                default: "Case",
+                rules: [
+                    { unit: "QC", when: { station_display_name_contains: ["qc"] } },
+                    { unit: "Insert", when: { part_name_contains: ["*"] } },
+                    { unit: "Tray", when: { part_name_contains: ["tray"] } },
+                    { unit: "Door", when: { part_name_contains: ["door"] } },
+                    { unit: "Drawer Front", when: { part_name_contains: ["drawer"] } },
+                    { unit: "Drawer Box", when: { part_name_contains: ["dwr", "drw"] } },
+                ],
+            };
+        }
+
+        function _setAssemblyRulesMsg(text, ok) {
+            const el = document.getElementById('assembly_rules_msg');
+            if (!el) return;
+            el.textContent = text || '';
+            el.className = 'msg ' + (ok ? 'ok' : 'err');
+        }
+
+        function assemblyRulesToggleAdvanced() {
+            const wrap = document.getElementById('assembly_rules_json_wrap');
+            if (!wrap) return;
+            wrap.style.display = (wrap.style.display === 'none' || !wrap.style.display) ? 'block' : 'none';
+        }
+
+        function _assemblySupportedMatchKeys() {
+            return [
+                { key: 'part_name_contains', label: 'Part name contains' },
+                { key: 'station_display_name_contains', label: 'Station display name contains' },
+                { key: 'station_code_contains', label: 'Station code contains' },
+                { key: 'opening_letter_contains', label: 'Opening letter contains' },
+            ];
+        }
+
+        function _assemblyRulesNormalize(obj) {
+            const defObj = assemblyRulesDefaultObject();
+            if (!obj || typeof obj !== 'object') return { ...defObj };
+            const out = {
+                version: 1,
+                default: (obj.default || defObj.default || 'Case').toString(),
+                rules: Array.isArray(obj.rules) ? obj.rules : [],
+            };
+            return out;
+        }
+
+        function _assemblyRulesToBuilderModel(obj) {
+            const cfg = _assemblyRulesNormalize(obj);
+            const supported = _assemblySupportedMatchKeys().map(x => x.key);
+            const ui = { default: cfg.default || 'Case', rows: [], has_advanced: false };
+            (cfg.rules || []).forEach(r => {
+                if (!r || typeof r !== 'object') return;
+                const unit = (r.unit || '').toString().trim();
+                const when = r.when;
+                if (!unit || !when || typeof when !== 'object') { ui.has_advanced = true; return; }
+                let found = null;
+                for (const k of supported) {
+                    if (Object.prototype.hasOwnProperty.call(when, k)) { found = k; break; }
+                }
+                if (!found) { ui.has_advanced = true; return; }
+                const otherKeys = Object.keys(when).filter(k => k !== found);
+                if (otherKeys.length) ui.has_advanced = true;
+                let vals = when[found];
+                if (typeof vals === 'string') vals = [vals];
+                if (!Array.isArray(vals)) { ui.has_advanced = true; return; }
+                const cleaned = vals.map(v => (v || '').toString().trim()).filter(Boolean);
+                ui.rows.push({ unit, match_key: found, values_csv: cleaned.join(', ') });
+            });
+            if (!ui.rows.length) {
+                // Seed with defaults if nothing to show
+                const d = defObj;
+                ui.default = d.default || 'Case';
+                ui.rows = (d.rules || []).map(r => {
+                    const unit = (r.unit || '').toString();
+                    const when = r.when || {};
+                    const k = Object.keys(when)[0] || 'part_name_contains';
+                    const vals = Array.isArray(when[k]) ? when[k] : [when[k]];
+                    const cleaned = vals.map(v => (v || '').toString().trim()).filter(Boolean);
+                    return { unit, match_key: k, values_csv: cleaned.join(', ') };
+                });
+            }
+            return ui;
+        }
+
+        function _assemblyRulesBuilderToObject() {
+            const def = (document.getElementById('assembly_rules_default')?.value || 'Case').toString().trim() || 'Case';
+            const supported = _assemblySupportedMatchKeys().map(x => x.key);
+            const tb = document.getElementById('assembly_rules_tbody');
+            const rows = [];
+            if (tb) {
+                Array.from(tb.querySelectorAll('tr[data-i]')).forEach(tr => {
+                    const unit = (tr.querySelector('.ar_unit')?.value || '').toString().trim();
+                    const mk = (tr.querySelector('.ar_match')?.value || '').toString().trim();
+                    const valsRaw = (tr.querySelector('.ar_vals')?.value || '').toString();
+                    if (!unit || !mk) return;
+                    if (!supported.includes(mk)) return;
+                    const vals = valsRaw.split(',').map(s => s.trim()).filter(Boolean);
+                    if (!vals.length) return;
+                    rows.push({ unit, when: { [mk]: vals } });
+                });
+            }
+            return { version: 1, default: def, rules: rows };
+        }
+
+        function _assemblyRulesRenderBuilder(model) {
+            const tb = document.getElementById('assembly_rules_tbody');
+            const defInp = document.getElementById('assembly_rules_default');
+            if (defInp) defInp.value = (model.default || 'Case').toString();
+            if (!tb) return;
+            const opts = _assemblySupportedMatchKeys()
+                .map(o => `<option value="${o.key}">${o.label}</option>`)
+                .join('');
+            tb.innerHTML = (model.rows || []).map((r, i) => {
+                const unit = (r.unit || '').toString().replace(/"/g, '&quot;');
+                const vcsv = (r.values_csv || '').toString().replace(/"/g, '&quot;');
+                const mk = (r.match_key || 'part_name_contains').toString();
+                const sel = opts.replace(`value="${mk}"`, `value="${mk}" selected`);
+                return `<tr data-i="${i}">
+                    <td>${i + 1}</td>
+                    <td><input class="ar_unit" style="min-width:160px;" value="${unit}" onchange="assemblyRulesSyncFromBuilder()" /></td>
+                    <td><select class="ar_match" style="min-width:220px;" onchange="assemblyRulesSyncFromBuilder()">${sel}</select></td>
+                    <td><input class="ar_vals" style="min-width:320px; width:100%;" placeholder="comma, separated, values" value="${vcsv}" onchange="assemblyRulesSyncFromBuilder()" /></td>
+                    <td style="white-space:nowrap;">
+                        <button class="btn btn-secondary" type="button" style="padding:6px 10px;" onclick="assemblyRulesMove(${i}, -1)">↑</button>
+                        <button class="btn btn-secondary" type="button" style="padding:6px 10px;" onclick="assemblyRulesMove(${i}, 1)">↓</button>
+                        <button class="btn btn-secondary" type="button" style="padding:6px 10px; background:#7f1d1d; color:#fff;" onclick="assemblyRulesRemove(${i})">Delete</button>
+                    </td>
+                </tr>`;
+            }).join('') || `<tr><td colspan="5"><em>No rules yet.</em></td></tr>`;
+        }
+
+        function assemblyRulesSyncFromBuilder() {
+            // keep advanced JSON in sync (for copy/export + safe fallback)
+            try {
+                const ta = document.getElementById('assembly_rules_json');
+                if (!ta) return;
+                const obj = _assemblyRulesBuilderToObject();
+                ta.value = JSON.stringify(obj, null, 2);
+            } catch {}
+        }
+
+        function assemblyRulesAddRow() {
+            const tb = document.getElementById('assembly_rules_tbody');
+            if (!tb) return;
+            // If currently empty placeholder, load defaults first
+            const hasRows = tb.querySelector('tr[data-i]');
+            if (!hasRows) {
+                const model = _assemblyRulesToBuilderModel(assemblyRulesDefaultObject());
+                model.rows.push({ unit: 'Case', match_key: 'part_name_contains', values_csv: '' });
+                _assemblyRulesRenderBuilder(model);
+                assemblyRulesSyncFromBuilder();
+                return;
+            }
+            const model = _assemblyRulesToBuilderModel(_assemblyRulesBuilderToObject());
+            model.rows.push({ unit: 'Case', match_key: 'part_name_contains', values_csv: '' });
+            _assemblyRulesRenderBuilder(model);
+            assemblyRulesSyncFromBuilder();
+        }
+
+        function assemblyRulesRemove(i) {
+            const model = _assemblyRulesToBuilderModel(_assemblyRulesBuilderToObject());
+            model.rows.splice(Number(i || 0), 1);
+            _assemblyRulesRenderBuilder(model);
+            assemblyRulesSyncFromBuilder();
+        }
+
+        function assemblyRulesMove(i, dir) {
+            const idx = Number(i || 0);
+            const d = Number(dir || 0);
+            const model = _assemblyRulesToBuilderModel(_assemblyRulesBuilderToObject());
+            const j = idx + d;
+            if (j < 0 || j >= model.rows.length) return;
+            const tmp = model.rows[idx];
+            model.rows[idx] = model.rows[j];
+            model.rows[j] = tmp;
+            _assemblyRulesRenderBuilder(model);
+            assemblyRulesSyncFromBuilder();
+        }
+
+        function assemblyRulesSetDefault() {
+            const obj = assemblyRulesDefaultObject();
+            const ta = document.getElementById('assembly_rules_json');
+            if (ta) ta.value = JSON.stringify(obj, null, 2);
+            const model = _assemblyRulesToBuilderModel(obj);
+            _assemblyRulesRenderBuilder(model);
+            assemblyRulesSyncFromBuilder();
+            _setAssemblyRulesMsg('Loaded defaults (not saved yet).', true);
+        }
+
+        async function assemblyRulesLoad() {
+            _setAssemblyRulesMsg('Loading…', true);
+            try {
+                const res = await fetch('/api/admin/assembly_unit_rules');
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || res.statusText);
+                const ta = document.getElementById('assembly_rules_json');
+                const rules = data.rules && typeof data.rules === 'object' ? data.rules : {};
+                const obj = Object.keys(rules).length ? rules : assemblyRulesDefaultObject();
+                if (ta) ta.value = JSON.stringify(obj, null, 2);
+                const model = _assemblyRulesToBuilderModel(obj);
+                _assemblyRulesRenderBuilder(model);
+                assemblyRulesSyncFromBuilder();
+                if (model.has_advanced) {
+                    const wrap = document.getElementById('assembly_rules_json_wrap');
+                    if (wrap) wrap.style.display = 'block';
+                    _setAssemblyRulesMsg('Loaded rules. Some advanced rules were detected — Advanced (JSON) is enabled to avoid losing them.', true);
+                } else {
+                    _setAssemblyRulesMsg(Object.keys(rules).length ? 'Loaded saved rules.' : 'No saved rules yet. Loaded defaults.', true);
+                }
+            } catch (e) {
+                _setAssemblyRulesMsg(e.message || 'Failed to load rules', false);
+            }
+        }
+
+        async function assemblyRulesSave() {
+            try {
+                const ta = document.getElementById('assembly_rules_json');
+                const wrap = document.getElementById('assembly_rules_json_wrap');
+                const advancedOpen = !!(wrap && wrap.style.display === 'block');
+
+                let obj = null;
+                if (advancedOpen && ta) {
+                    obj = JSON.parse(ta.value || '{}');
+                } else {
+                    obj = _assemblyRulesBuilderToObject();
+                    if (ta) ta.value = JSON.stringify(obj, null, 2);
+                }
+                const res = await fetch('/api/admin/assembly_unit_rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rules: obj }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || res.statusText);
+                _setAssemblyRulesMsg('Saved.', true);
+            } catch (e) {
+                _setAssemblyRulesMsg(e.message || 'Failed to save rules', false);
+            }
+        }
+
+        async function assemblyRulesTest() {
+            try {
+                const ta = document.getElementById('assembly_rules_json');
+                const st = document.getElementById('assembly_rules_test_station_display');
+                const pn = document.getElementById('assembly_rules_test_part');
+                if (!ta || !st || !pn) return;
+                const wrap = document.getElementById('assembly_rules_json_wrap');
+                const advancedOpen = !!(wrap && wrap.style.display === 'block');
+                const obj = advancedOpen ? JSON.parse(ta.value || '{}') : _assemblyRulesBuilderToObject();
+                const res = await fetch('/api/admin/assembly_unit_rules/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rules: obj,
+                        ctx: {
+                            station_code: 'Assembly',
+                            station_display_name: st.value || '',
+                            part_name: pn.value || '',
+                            opening_letter: '',
+                        }
+                    }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || res.statusText);
+                _setAssemblyRulesMsg(`Test result: ${data.unit}`, true);
+            } catch (e) {
+                _setAssemblyRulesMsg(e.message || 'Test failed', false);
+            }
+        }
 
         function fixExternalLinks() {
             const host = window.location.hostname || 'localhost';
@@ -703,6 +1323,87 @@
             await loadOperators();
         }
 
+        async function loadOperatorBarcodes() {
+            const tbody = document.getElementById('op_barcode_tbody');
+            if (!tbody) return;
+            tbody.innerHTML = '<tr><td colspan="3">Loading…</td></tr>';
+            try {
+                const res = await fetch('/api/admin/operator_barcodes');
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    tbody.innerHTML = `<tr><td colspan="3">Error: ${escapeHtml((data && data.error) ? data.error : String(res.status))}</td></tr>`;
+                    return;
+                }
+                const items = data.mappings || [];
+                if (!items.length) {
+                    tbody.innerHTML = '<tr><td colspan="3">No badge barcodes mapped yet.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = items.map(it => {
+                    const b = (it.barcode || '').toString();
+                    const op = (it.operator_id || '').toString();
+                    return `
+                        <tr>
+                            <td><span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">${escapeHtml(b)}</span></td>
+                            <td><strong>${escapeHtml(op)}</strong></td>
+                            <td><button class="btn btn-danger" onclick="deleteOperatorBarcode(${JSON.stringify(b)})">Delete</button></td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="3">Error: ${escapeHtml(e.message || String(e))}</td></tr>`;
+            }
+        }
+
+        async function saveOperatorBarcode() {
+            const barcode = (document.getElementById('op_barcode')?.value || '').trim();
+            const operator_id = (document.getElementById('op_barcode_operator')?.value || '').trim();
+            if (!barcode || !operator_id) {
+                setMsg('op_barcode_msg', 'Barcode and Operator ID are required.', false);
+                return;
+            }
+            try {
+                const res = await fetch('/api/admin/operator_barcodes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ barcode, operator_id })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('op_barcode_msg', 'Error: ' + (data.error || res.status), false);
+                    return;
+                }
+                setMsg('op_barcode_msg', 'Saved.', true);
+                const b = document.getElementById('op_barcode'); if (b) b.value = '';
+                const o = document.getElementById('op_barcode_operator'); if (o) o.value = '';
+                await loadOperatorBarcodes();
+            } catch (e) {
+                setMsg('op_barcode_msg', 'Error: ' + e.message, false);
+            }
+        }
+
+        async function deleteOperatorBarcode(barcode) {
+            const b = (barcode || '').toString().trim();
+            if (!b) return;
+            if (!confirm('Delete this operator barcode mapping?')) return;
+            try {
+                const res = await fetch('/api/admin/operator_barcodes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ barcode: b, delete: true })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('op_barcode_msg', 'Error: ' + (data.error || res.status), false);
+                    return;
+                }
+                setMsg('op_barcode_msg', 'Deleted.', true);
+                await loadOperatorBarcodes();
+            } catch (e) {
+                setMsg('op_barcode_msg', 'Error: ' + e.message, false);
+            }
+        }
+
         async function backupDb() {
             setMsg('db_msg', 'Creating backup…', true);
             const res = await fetch('/api/admin/db/backup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
@@ -940,6 +1641,14 @@
         async function detectDongles() {
             setMsg('dongle_msg', 'Detecting USB dongles...', true);
             try {
+                // Fetch existing stations first so indicators are accurate
+                let mappedStations = [];
+                try {
+                    const sRes = await fetch('/api/admin/stations');
+                    const sData = await sRes.json();
+                    if (sRes.ok && sData.stations) mappedStations = sData.stations;
+                } catch(e) { console.warn('Could not fetch stations for indicators', e); }
+
                 const res = await fetch('/api/admin/dongles/detect');
                 const data = await res.json();
                 if (!res.ok || data.error) {
@@ -950,17 +1659,42 @@
                 const dongles = data.scanners || [];
                 detectedDonglesCache = dongles;
                 const donglesHtml = dongles.length > 0 
-                    ? dongles.map(d => `
-                        <div style="padding: 8px; border-bottom: 1px solid #ddd;">
-                            <strong>${d.name || 'Unknown Device'}</strong><br>
-                            <span class="mono" style="font-size: 11px;">${d.stable_path || d.path}</span><br>
+                    ? dongles.map(d => {
+                        const path = (d.stable_path || d.path || '').toString();
+                        const mapped = mappedStations.find(s => s.device_path === path);
+                        const inUseHtml = mapped 
+                            ? `<span style="display:inline-block; padding:2px 8px; border-radius:999px; background:#fef3c7; color:#92400e; font-size:10px; font-weight:800; border:1px solid #fde68a; margin-left:8px;">Used by: ${mapped.station_code}</span>` 
+                            : '';
+                        
+                        return `
+                        <div style="padding: 10px; border-bottom: 1px solid #ddd; background: ${mapped ? '#fffcf0' : 'transparent'};">
+                            <div style="display:flex; align-items:center;">
+                                <strong>${d.name || 'Unknown Device'}</strong>
+                                ${inUseHtml}
+                            </div>
+                            <span class="mono" style="font-size: 11px;">${path}</span><br>
                             <span style="font-size: 11px; color: #666;">${d.phys || ''}</span>
                         </div>
-                    `).join('')
+                    `;}).join('')
                     : '<em>No USB dongles detected. Make sure dongles are connected.</em>';
                 
                 document.getElementById('detected_dongles').innerHTML = donglesHtml;
                 setMsg('dongle_msg', `Found ${dongles.length} device(s)`, true);
+                
+                // Also update the dropdown
+                const sel = document.getElementById('add_device');
+                if (sel) {
+                    sel.innerHTML = '<option value="">(Select a device)</option>';
+                    dongles.forEach(d => {
+                        const p = (d.stable_path || d.path || '').toString();
+                        const mapped = mappedStations.find(s => s.device_path === p);
+                        const opt = document.createElement('option');
+                        opt.value = p;
+                        opt.textContent = (mapped ? `[USED: ${mapped.station_code}] ` : '') + (d.name || 'Device') + ' (' + p + ')';
+                        sel.appendChild(opt);
+                    });
+                }
+
                 await loadStations();
             } catch (e) {
                 setMsg('dongle_msg', 'Error: ' + e.message, false);
@@ -1347,12 +2081,464 @@
             }
         }
 
+        // -----------------------------
+        // Collapsible sections (Admin)
+        // -----------------------------
+        function _slug(s) {
+            return (s || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+        }
+        function initAdminSidebarLayout() {
+            const container = document.querySelector('.container');
+            if (!container) return;
+
+            // Find top-level cards (admin sections). Leave modals/backdrops alone.
+            const cards = Array.from(container.children).filter(el => el && el.classList && el.classList.contains('card'));
+            if (!cards.length) return;
+
+            // Build layout skeleton
+            const layout = document.createElement('div');
+            layout.className = 'admin_layout';
+
+            const sidebar = document.createElement('div');
+            sidebar.className = 'admin_sidebar';
+
+            const sideCard = document.createElement('div');
+            sideCard.className = 'card';
+
+            const sideTitle = document.createElement('h2');
+            sideTitle.textContent = 'Admin sections';
+            sideCard.appendChild(sideTitle);
+
+            const selectWrap = document.createElement('div');
+            selectWrap.className = 'admin_select_wrap';
+            const select = document.createElement('select');
+            select.className = 'admin_select';
+            selectWrap.appendChild(select);
+            sideCard.appendChild(selectWrap);
+
+            const navList = document.createElement('div');
+            navList.className = 'admin_nav_list';
+            sideCard.appendChild(navList);
+
+            sidebar.appendChild(sideCard);
+
+            const main = document.createElement('div');
+            main.className = 'admin_main';
+
+            // Build sections model
+            const sections = [];
+            cards.forEach((card, idx) => {
+                const h2 = card.querySelector('h2');
+                const title = (h2?.textContent || '').trim() || `Section ${idx + 1}`;
+                const id = _slug(title) || `section_${idx + 1}`;
+                card.classList.add('admin_section');
+                card.setAttribute('data-admin-id', id);
+                card.setAttribute('data-admin-title', title);
+                sections.push({ id, title, el: card });
+            });
+
+            // Sort sections so setup-first items appear at the top.
+            // v1 doesn't have a literal "Stations" card; the mapping section covers station setup + barcode mapping.
+            function _prio(title) {
+                const t = (title || '').toString().toLowerCase();
+                if (t.includes('usb dongle') || t.includes('barcode') || t.includes('station')) return 0;
+                return 10;
+            }
+            sections.sort((a, b) => {
+                const pa = _prio(a.title);
+                const pb = _prio(b.title);
+                if (pa !== pb) return pa - pb;
+                return a.title.localeCompare(b.title);
+            });
+
+            // Move cards into main in sorted order
+            sections.forEach(s => main.appendChild(s.el));
+
+            // Insert layout at top of container and keep non-card nodes (modals) after it
+            container.insertBefore(layout, container.firstChild);
+            layout.appendChild(sidebar);
+            layout.appendChild(main);
+
+            // Build nav UI
+            function setActive(id, opts) {
+                const target = sections.find(s => s.id === id) || sections[0];
+                if (!target) return;
+                sections.forEach(s => s.el.classList.toggle('active', s.id === target.id));
+                Array.from(navList.querySelectorAll('button.admin_nav_btn')).forEach(btn => {
+                    btn.classList.toggle('active', btn.getAttribute('data-admin-id') === target.id);
+                });
+                try { select.value = target.id; } catch {}
+                try { localStorage.setItem('innosaw_admin_active_v1', target.id); } catch {}
+                if (!(opts && opts.noHash)) {
+                    try { window.location.hash = `admin_${target.id}`; } catch {}
+                }
+                try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
+            }
+
+            // Buttons + select options
+            select.innerHTML = '';
+            navList.innerHTML = '';
+            sections.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.title;
+                select.appendChild(opt);
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'admin_nav_btn';
+                btn.setAttribute('data-admin-id', s.id);
+                btn.innerHTML = `<span>${s.title}</span><span style="opacity:.6; font-weight:900;">›</span>`;
+                btn.addEventListener('click', () => setActive(s.id));
+                navList.appendChild(btn);
+            });
+
+            select.addEventListener('change', () => setActive(select.value));
+
+            function initialId() {
+                const h = (window.location.hash || '').toString();
+                const m = h.match(/^#admin_([a-z0-9_]+)$/i);
+                if (m && m[1]) {
+                    const key = m[1].toLowerCase();
+                    // Backwards compatibility: old deep-link before the rename.
+                    if (key === 'usb_dongle_mapping') return 'stations_barcode_mapping';
+                    return key;
+                }
+                try {
+                    const saved = localStorage.getItem('innosaw_admin_active_v1');
+                    if (saved === 'usb_dongle_mapping') return 'stations_barcode_mapping';
+                    if (saved) return saved;
+                } catch {}
+                return sections[0]?.id;
+            }
+
+            setActive(initialId(), { noHash: false });
+            window.addEventListener('hashchange', () => setActive(initialId(), { noHash: true }));
+        }
+        function makeAdminCardsCollapsible() {
+            const cards = Array.from(document.querySelectorAll('.container .card'));
+            cards.forEach(card => {
+                if (!card || card.getAttribute('data-collapsible') === '0') return;
+                const h2 = card.querySelector('h2');
+                if (!h2) return;
+                if (card.querySelector('.card_header')) return;
+
+                const title = (h2.textContent || '').trim() || 'section';
+                const key = `innosaw_admin_card_${_slug(title)}`;
+
+                const header = document.createElement('div');
+                header.className = 'card_header';
+
+                const toggle = document.createElement('button');
+                toggle.type = 'button';
+                toggle.className = 'card_toggle';
+
+                const body = document.createElement('div');
+                body.className = 'card_body';
+
+                // Move h2 into header
+                header.appendChild(h2);
+                header.appendChild(toggle);
+
+                // Move the remaining original card contents into body
+                // (header isn't in the DOM yet, so we must move from the card itself).
+                while (card.firstChild) {
+                    body.appendChild(card.firstChild);
+                }
+                card.appendChild(header);
+                card.appendChild(body);
+
+                function setCollapsed(collapsed) {
+                    card.classList.toggle('collapsed', !!collapsed);
+                    toggle.textContent = collapsed ? 'Expand' : 'Collapse';
+                    try { localStorage.setItem(key, collapsed ? '1' : '0'); } catch {}
+                }
+
+                let collapsed = false;
+                try { collapsed = (localStorage.getItem(key) === '1'); } catch {}
+                setCollapsed(collapsed);
+
+                toggle.addEventListener('click', () => {
+                    setCollapsed(!card.classList.contains('collapsed'));
+                });
+            });
+        }
+
+        // -----------------------------
+        // Bin Dashboard Settings
+        // -----------------------------
+        async function binConfigLoad() {
+            const msg = document.getElementById('bin_config_msg');
+            try {
+                const res = await fetch('/api/admin/kiosk_layout');
+                const data = await res.json();
+                if (data.layout && data.layout.bin_config) {
+                    const cfg = data.layout.bin_config;
+                    document.getElementById('admin_bin_count').value = cfg.count || 40;
+                    document.getElementById('admin_bin_cols').value = cfg.cols || 10;
+                    document.getElementById('admin_bin_rows').value = cfg.rows || 4;
+                    document.getElementById('admin_bin_mode').value = cfg.mode || 'standard';
+                    document.getElementById('admin_bin_num_size').value = cfg.num_size || 15;
+                    document.getElementById('admin_bin_content_size').value = cfg.content_size || 16;
+                    document.getElementById('admin_bin_status_size').value = cfg.status_size || 11;
+                    document.getElementById('admin_bin_color_ready').value = cfg.color_ready || '#059669';
+                    document.getElementById('admin_bin_color_partial').value = cfg.color_partial || '#2563eb';
+                    document.getElementById('admin_bin_color_mixed').value = cfg.color_mixed || '#d97706';
+                    document.getElementById('admin_bin_color_empty').value = cfg.color_empty || '#2d2d2d';
+                }
+            } catch (e) {
+                if (msg) msg.textContent = 'Failed to load bin settings';
+            }
+        }
+
+        async function binConfigSave() {
+            const msg = document.getElementById('bin_config_msg');
+            if (msg) msg.textContent = 'Saving…';
+            try {
+                // First load current layout to avoid overwriting other station settings
+                const res = await fetch('/api/admin/kiosk_layout');
+                const data = await res.json();
+                const layout = data.layout || { version: 1, defaults: { widgets: [] }, stations: {}, station_types: {} };
+                
+                layout.bin_config = {
+                    count: parseInt(document.getElementById('admin_bin_count').value) || 40,
+                    cols: parseInt(document.getElementById('admin_bin_cols').value) || 10,
+                    rows: parseInt(document.getElementById('admin_bin_rows').value) || 4,
+                    mode: document.getElementById('admin_bin_mode').value || 'standard',
+                    num_size: parseInt(document.getElementById('admin_bin_num_size').value) || 15,
+                    content_size: parseInt(document.getElementById('admin_bin_content_size').value) || 16,
+                    status_size: parseInt(document.getElementById('admin_bin_status_size').value) || 11,
+                    color_ready: document.getElementById('admin_bin_color_ready').value,
+                    color_partial: document.getElementById('admin_bin_color_partial').value,
+                    color_mixed: document.getElementById('admin_bin_color_mixed').value,
+                    color_empty: document.getElementById('admin_bin_color_empty').value
+                };
+
+                const saveRes = await fetch('/api/admin/kiosk_layout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ layout }),
+                });
+                const saveData = await saveRes.json();
+                if (!saveRes.ok || saveData.error) throw new Error(saveData.error || 'Failed to save');
+                if (msg) msg.textContent = 'Settings saved successfully.';
+                setTimeout(() => { if (msg) msg.textContent = ''; }, 3000);
+            } catch (e) {
+                if (msg) msg.textContent = `Error: ${e.message}`;
+            }
+        }
+
         (function init() {
             fixExternalLinks();
+            initAdminSidebarLayout();
+            try { document.documentElement.classList.remove('admin_nav_boot'); } catch (e) {}
             loadOperators();
             loadStations();
             refreshBackups();
+            loadOperatorBarcodes();
+            binConfigLoad();
         })();
+
+        // -----------------------------
+        // Barcode mapping (scan_defaults.csv_fallback)
+        // -----------------------------
+        const _SCANMAP_CHOICES = [
+            '', 'Gcode_Filename','Part_Num','Job_Name','Cab_Name','Cab_Assembly_Num','Part_Name',
+            'Part_Material','Run_Name','Opening_letter','Part_Length','Part_Width','Edgeband_Info',
+            'Custom_1','Custom_2','Custom_3'
+        ];
+        const _SCANMAP_MOZ = ['Gcode_Filename','Part_Num','Job_Name','Cab_Name','Cab_Assembly_Num','Part_Name','Part_Material','Run_Name','Opening_letter','Part_Length','Part_Width','Edgeband_Info'];
+
+        function openScanMappingWizard() {
+            const w = document.getElementById('scanmap_wrap');
+            if (!w) return;
+            document.getElementById('scanmap_msg').textContent = '';
+            w.style.display = 'flex';
+            scanmapPopulateTargets();
+            scanmapLoadCurrent();
+            try { document.getElementById('scanmap_raw').focus(); } catch {}
+        }
+
+        function closeScanMappingWizard() {
+            const w = document.getElementById('scanmap_wrap');
+            if (w) w.style.display = 'none';
+        }
+
+        async function scanmapPopulateTargets() {
+            const sel = document.getElementById('scanmap_apply_target');
+            if (!sel) return;
+            // keep "default" option
+            sel.innerHTML = '<option value="default" selected>Default (all stations)</option>';
+            try {
+                const res = await fetch('/api/admin/stations');
+                const data = await res.json();
+                const stations = (data && data.stations) ? data.stations : [];
+                const codes = [];
+                for (const st of stations) {
+                    const c = (st.station_code || st.station || '').toString().trim();
+                    if (c && !codes.includes(c)) codes.push(c);
+                }
+                codes.sort();
+                for (const c of codes) {
+                    const opt = document.createElement('option');
+                    opt.value = `station:${c}`;
+                    opt.textContent = `Station: ${c}`;
+                    sel.appendChild(opt);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function scanmapUpdateDelimMode() {
+            const auto = !!document.getElementById('scanmap_delim_auto')?.checked;
+            const inp = document.getElementById('scanmap_delim');
+            const hint = document.getElementById('scanmap_delim_hint');
+            if (inp) inp.disabled = auto;
+            if (hint) hint.textContent = auto ? '' : 'Manual delimiter (ex: | or ^)';
+        }
+
+        function _scanmapDetectDelim(raw) {
+            const t = (raw || '').toString();
+            if ((t.split('|').length - 1) >= 2) return '|';
+            if ((t.split('^').length - 1) >= 2) return '^';
+            if ((t.split(',').length - 1) >= 2) return ',';
+            if ((t.split('\t').length - 1) >= 2) return '\t';
+            return '';
+        }
+
+        function scanmapMaybeEnter(e) {
+            if (!e) return;
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                scanmapSplit();
+            }
+        }
+
+        function scanmapSplit() {
+            const raw = (document.getElementById('scanmap_raw')?.value || '').toString();
+            const auto = !!document.getElementById('scanmap_delim_auto')?.checked;
+            const hint = document.getElementById('scanmap_delim_hint');
+            let delim = (document.getElementById('scanmap_delim')?.value || '').toString();
+            if (auto) {
+                delim = _scanmapDetectDelim(raw);
+                if (!delim) {
+                    if (hint) hint.textContent = 'Auto: not detected — enter delimiter';
+                    document.getElementById('scanmap_delim_auto').checked = false;
+                    scanmapUpdateDelimMode();
+                    return;
+                }
+                if (hint) hint.textContent = `Detected: ${delim === '\t' ? 'TAB' : delim}`;
+            } else {
+                delim = (delim || '').trim();
+                if (!delim) {
+                    if (hint) hint.textContent = 'Enter delimiter (ex: | or ^)';
+                    return;
+                }
+                if (hint) hint.textContent = `Manual: ${delim === '\t' ? 'TAB' : delim}`;
+            }
+
+            let parts = raw.split(delim).map(s => (s || '').toString().trim());
+            // Drop leading station prefix if present (H08, H10, Edge, etc)
+            const prefixes = new Set(['H08','H10','QC','Edge','Dowel','Sort','Pull','Assembly','Wrap','Ship']);
+            if (parts.length >= 2 && prefixes.has((parts[0] || '').trim())) parts = parts.slice(1);
+
+            const tbody = document.getElementById('scanmap_tbody');
+            if (!tbody) return;
+            const opts = _SCANMAP_CHOICES.map(v => `<option value="${String(v).replace(/"/g,'&quot;')}">${v ? v : '— (ignore)'}</option>`).join('');
+            const pre = [];
+            for (let i = 0; i < parts.length; i++) pre[i] = '';
+            // If exactly Mozaik standard length, prefill
+            if (parts.length === _SCANMAP_MOZ.length) {
+                for (let i = 0; i < parts.length; i++) pre[i] = _SCANMAP_MOZ[i];
+            }
+            tbody.innerHTML = parts.map((v, i) => {
+                const safe = escapeHtml(v || '');
+                return `
+                    <tr data-i="${i}">
+                        <td style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;">${i}</td>
+                        <td style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;" title="${safe}">${safe || '<em>(empty)</em>'}</td>
+                        <td>
+                            <select class="scanmap_meaning" data-i="${i}">${opts}</select>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+            // Apply prefills
+            Array.from(document.querySelectorAll('select.scanmap_meaning')).forEach(sel => {
+                const i = parseInt(sel.getAttribute('data-i') || '0', 10);
+                sel.value = (pre[i] || '');
+            });
+        }
+
+        function scanmapAssignMozaikStandard() {
+            const sels = Array.from(document.querySelectorAll('select.scanmap_meaning'));
+            if (!sels.length) return;
+            if (sels.length !== _SCANMAP_MOZ.length) {
+                setMsg('scanmap_msg', `Expected ${_SCANMAP_MOZ.length} columns for Mozaik standard, got ${sels.length}.`, false);
+                return;
+            }
+            sels.forEach((sel, i) => { sel.value = _SCANMAP_MOZ[i] || ''; });
+            setMsg('scanmap_msg', 'Applied Mozaik standard mapping.', true);
+        }
+
+        function scanmapClear() {
+            Array.from(document.querySelectorAll('select.scanmap_meaning')).forEach(sel => { sel.value = ''; });
+            setMsg('scanmap_msg', 'Cleared.', true);
+        }
+
+        async function scanmapLoadCurrent() {
+            try {
+                const res = await fetch('/api/admin/scan_defaults');
+                const data = await res.json();
+                const d = (data && data.scan_defaults && typeof data.scan_defaults === 'object') ? data.scan_defaults : {};
+                // Store on window so save can merge
+                window.__scan_defaults = d;
+                setMsg('scanmap_msg', 'Loaded current mapping.', true);
+            } catch (e) {
+                window.__scan_defaults = {};
+            }
+        }
+
+        async function scanmapSave() {
+            const target = (document.getElementById('scanmap_apply_target')?.value || 'default').toString();
+            const auto = !!document.getElementById('scanmap_delim_auto')?.checked;
+            const delimManual = (document.getElementById('scanmap_delim')?.value || '').toString().trim();
+            const delimiter = auto ? 'auto' : (delimManual || 'auto');
+
+            const cols = Array.from(document.querySelectorAll('select.scanmap_meaning')).map(sel => (sel.value || '').toString());
+            if (!cols.length) {
+                setMsg('scanmap_msg', 'Nothing to save yet. Paste a scan and click Split first.', false);
+                return;
+            }
+            const csv_fallback = { delimiter, columns: cols };
+
+            const cur = (window.__scan_defaults && typeof window.__scan_defaults === 'object') ? window.__scan_defaults : {};
+            const out = { ...cur };
+            if (target === 'default') {
+                out.csv_fallback = csv_fallback;
+            } else if (target.startsWith('station:')) {
+                const code = target.split(':', 2)[1] || '';
+                out.by_station = (out.by_station && typeof out.by_station === 'object') ? out.by_station : {};
+                out.by_station[code] = { csv_fallback };
+            }
+
+            setMsg('scanmap_msg', 'Saving…', true);
+            try {
+                const res = await fetch('/api/admin/scan_defaults', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scan_defaults: out })
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('scanmap_msg', 'Error: ' + (data.error || res.status), false);
+                    return;
+                }
+                window.__scan_defaults = data.scan_defaults || out;
+                setMsg('scanmap_msg', 'Saved.', true);
+            } catch (e) {
+                setMsg('scanmap_msg', 'Error: ' + e.message, false);
+            }
+        }
     </script>
 </body>
 </html>

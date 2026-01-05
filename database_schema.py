@@ -22,6 +22,7 @@ import sqlite3
 import logging
 import os
 import shutil
+import json
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple, Union
@@ -35,6 +36,232 @@ _REPO_DATA_DIR = Path(__file__).parent / "data"
 _DATA_DIR_ENV = (os.environ.get('QR_SCANNER_DATA_DIR') or os.environ.get('INNOSAW_DATA_DIR') or '').strip()
 DATA_DIR = (Path(_DATA_DIR_ENV).expanduser() if _DATA_DIR_ENV else _REPO_DATA_DIR)
 DB_PATH = DATA_DIR / "manufacturing.db"
+
+# ============================================================
+# Assembly unit (group) classification rules (DB-backed)
+# ============================================================
+
+_ASSEMBLY_RULES_CACHE = {
+    "ts": 0.0,
+    "raw": None,
+    "parsed": None,
+}
+
+
+def _default_assembly_unit_rules() -> dict:
+    """
+    Default rules (ordered). First match wins.
+
+    Notes:
+    - This is intentionally simple and stable (substring matching).
+    - Admin UI can override via settings key: assembly_unit_rules_json
+    """
+    return {
+        "version": 1,
+        "default": "Case",
+        "rules": [
+            {"unit": "QC", "when": {"station_display_name_contains": ["qc"]}},
+            {"unit": "Insert", "when": {"part_name_contains": ["*"]}},
+            {"unit": "Tray", "when": {"part_name_contains": ["tray"]}},
+            {"unit": "Door", "when": {"part_name_contains": ["door"]}},
+            {"unit": "Drawer Front", "when": {"part_name_contains": ["drawer"]}},
+            {"unit": "Drawer Box", "when": {"part_name_contains": ["dwr", "drw"]}},
+        ],
+    }
+
+
+def _parse_assembly_unit_rules(raw_val) -> dict:
+    if raw_val is None:
+        return _default_assembly_unit_rules()
+
+    # Accept dict already
+    if isinstance(raw_val, dict):
+        cfg = raw_val
+    else:
+        s = (str(raw_val) or "").strip()
+        if not s:
+            return _default_assembly_unit_rules()
+        try:
+            cfg = json.loads(s)  # type: ignore[name-defined]
+        except Exception:
+            return _default_assembly_unit_rules()
+
+    if not isinstance(cfg, dict):
+        return _default_assembly_unit_rules()
+
+    rules = cfg.get("rules")
+    if not isinstance(rules, list):
+        return _default_assembly_unit_rules()
+
+    # Ensure required keys exist
+    out = {
+        "version": int(cfg.get("version") or 1),
+        "default": str(cfg.get("default") or "Case"),
+        "rules": [],
+    }
+    for r in rules:
+        if not isinstance(r, dict):
+            continue
+        unit = (r.get("unit") or "").strip()
+        when = r.get("when")
+        if not unit or not isinstance(when, dict):
+            continue
+        out["rules"].append({"unit": unit, "when": when})
+    if not out["rules"]:
+        return _default_assembly_unit_rules()
+    return out
+
+
+def _load_assembly_unit_rules_cached(force: bool = False) -> dict:
+    """
+    Load rules from settings with a short cache.
+    Uses a new DB connection via get_setting; keep cache to avoid per-scan overhead.
+    """
+    import time as _time
+
+    now = _time.time()
+    ttl = 5.0
+    if (not force) and _ASSEMBLY_RULES_CACHE.get("parsed") and (now - float(_ASSEMBLY_RULES_CACHE.get("ts") or 0.0)) < ttl:
+        return _ASSEMBLY_RULES_CACHE["parsed"]  # type: ignore[return-value]
+
+    raw = None
+    try:
+        raw = get_setting("assembly_unit_rules_json", "")  # type: ignore[name-defined]
+    except Exception:
+        raw = ""
+
+    # If unchanged, refresh ts only
+    if (not force) and (raw == _ASSEMBLY_RULES_CACHE.get("raw")) and _ASSEMBLY_RULES_CACHE.get("parsed") is not None:
+        _ASSEMBLY_RULES_CACHE["ts"] = now
+        return _ASSEMBLY_RULES_CACHE["parsed"]  # type: ignore[return-value]
+
+    parsed = _parse_assembly_unit_rules(raw)
+    _ASSEMBLY_RULES_CACHE["ts"] = now
+    _ASSEMBLY_RULES_CACHE["raw"] = raw
+    _ASSEMBLY_RULES_CACHE["parsed"] = parsed
+    return parsed
+
+
+def classify_assembly_unit(
+    part_name: str,
+    station_code: str = None,
+    station_display_name: str = None,
+    opening_letter: str = None,
+    rules_override: dict = None,
+) -> str:
+    """
+    Return assembly unit/group label for a scan (Case/Drawer/Door/QC/etc).
+
+    rules_override: optional dict matching the rules schema (used by Admin "Test" UI).
+    """
+    cfg = _parse_assembly_unit_rules(rules_override) if isinstance(rules_override, dict) else _load_assembly_unit_rules_cached()
+    default_unit = (cfg.get("default") or "Case").strip() or "Case"
+
+    pn = (part_name or "")
+    pn_l = pn.lower()
+    sd = (station_display_name or "")
+    sd_l = sd.lower()
+    sc = (station_code or "")
+    sc_l = sc.lower()
+    ol = (opening_letter or "")
+    ol_l = ol.lower()
+
+    def _contains_all(hay: str, needles: list) -> bool:
+        for n in needles:
+            if not n:
+                continue
+            if str(n).lower() not in hay:
+                return False
+        return True
+
+    def _contains_any(hay: str, needles: list) -> bool:
+        for n in needles:
+            if not n:
+                continue
+            if str(n).lower() in hay:
+                return True
+        return False
+
+    for rule in (cfg.get("rules") or []):
+        if not isinstance(rule, dict):
+            continue
+        unit = (rule.get("unit") or "").strip()
+        when = rule.get("when")
+        if not unit or not isinstance(when, dict):
+            continue
+
+        ok = True
+
+        # Substring matching fields
+        if "part_name_contains" in when:
+            lst = when.get("part_name_contains") or []
+            if isinstance(lst, str):
+                lst = [lst]
+            ok = ok and _contains_any(pn_l, list(lst))
+
+        if "station_display_name_contains" in when:
+            lst = when.get("station_display_name_contains") or []
+            if isinstance(lst, str):
+                lst = [lst]
+            ok = ok and _contains_any(sd_l, list(lst))
+
+        if "station_code_contains" in when:
+            lst = when.get("station_code_contains") or []
+            if isinstance(lst, str):
+                lst = [lst]
+            ok = ok and _contains_any(sc_l, list(lst))
+
+        if "opening_letter_contains" in when:
+            lst = when.get("opening_letter_contains") or []
+            if isinstance(lst, str):
+                lst = [lst]
+            ok = ok and _contains_any(ol_l, list(lst))
+
+        # Exact match fields
+        if "station_code_equals" in when:
+            lst = when.get("station_code_equals") or []
+            if isinstance(lst, str):
+                lst = [lst]
+            ok = ok and (sc_l in [str(x).lower() for x in list(lst)])
+
+        if "opening_letter_equals" in when:
+            lst = when.get("opening_letter_equals") or []
+            if isinstance(lst, str):
+                lst = [lst]
+            ok = ok and (ol_l in [str(x).lower() for x in list(lst)])
+
+        # Regex support (optional)
+        if ok and "part_name_regex" in when:
+            try:
+                pat = str(when.get("part_name_regex") or "")
+                if pat:
+                    ok = ok and bool(re.search(pat, pn, flags=re.IGNORECASE))
+            except Exception:
+                ok = False
+
+        if ok and "station_display_name_regex" in when:
+            try:
+                pat = str(when.get("station_display_name_regex") or "")
+                if pat:
+                    ok = ok and bool(re.search(pat, sd, flags=re.IGNORECASE))
+            except Exception:
+                ok = False
+
+        if ok:
+            return unit
+
+    # Fallback: keep legacy behavior if no rules match
+    if "*" in pn:
+        return "Insert"
+    if "tray" in pn_l:
+        return "Tray"
+    if "door" in pn_l:
+        return "Door"
+    if "drawer" in pn_l:
+        return "Drawer Front"
+    if "dwr" in pn_l or "drw" in pn_l:
+        return "Drawer Box"
+    return default_unit
 
 
 def _maybe_seed_db_from_repo_location() -> None:
@@ -149,6 +376,9 @@ def init_database():
         'cab_type': 'TEXT',
         'station_display_name': 'TEXT',
         'material_thickness': 'TEXT',
+        'part_length': 'TEXT',
+        'part_width': 'TEXT',
+        'edge_material': 'TEXT',
     })
 
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scans_station ON scans(station_code)')
@@ -693,6 +923,86 @@ def init_database():
     ''')
     
     # ============================================
+    # MOZAIK INTEGRATION
+    # ============================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS mozaik_imports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            imported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            source_filename TEXT,
+            source_path TEXT,
+            file_hash TEXT UNIQUE,
+            job_name TEXT,
+            run_name TEXT,
+            run_number INTEGER,
+            created_at DATETIME,
+            created_by TEXT,
+            target_cpu_display_name TEXT,
+            sheets_count INTEGER DEFAULT 0,
+            parts_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'imported',
+            error TEXT
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS mozaik_expected_parts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            import_id INTEGER NOT NULL,
+            job_name TEXT,
+            run_name TEXT,
+            run_number INTEGER,
+            material_name TEXT,
+            material_abbr TEXT,
+            material_thickness TEXT,
+            sheet_id INTEGER,
+            pattern_num TEXT,
+            gcode_filename TEXT,
+            gcode_guess TEXT,
+            sheet_w_mm REAL,
+            sheet_l_mm REAL,
+            part_xml_id TEXT,
+            part_no TEXT,
+            part_name TEXT,
+            part_shorthand_name TEXT,
+            part_comment TEXT,
+            part_edge_band TEXT,
+            part_band_temp_symbol TEXT,
+            part_color TEXT,
+            part_dxf_filename TEXT,
+            part_is_remnant INTEGER,
+            part_x_mm REAL,
+            part_y_mm REAL,
+            part_rot INTEGER,
+            part_w_mm REAL,
+            part_l_mm REAL,
+            cabinet_assembly TEXT,
+            cabinet_name TEXT,
+            room_name TEXT,
+            opening_letter TEXT,
+            geometry_json TEXT,
+            UNIQUE(import_id, sheet_id, material_name, part_xml_id),
+            FOREIGN KEY (import_id) REFERENCES mozaik_imports(id)
+        )
+    ''')
+
+    _ensure_table_columns(cursor, 'mozaik_expected_parts', {
+        'sheet_w_mm': 'REAL',
+        'sheet_l_mm': 'REAL',
+        'part_w_mm': 'REAL',
+        'part_l_mm': 'REAL',
+        'part_edge_band': 'TEXT',
+        'part_band_temp_symbol': 'TEXT',
+        'part_color': 'TEXT',
+        'part_dxf_filename': 'TEXT',
+        'part_is_remnant': 'INTEGER',
+        'part_x_mm': 'REAL',
+        'part_y_mm': 'REAL',
+        'part_rot': 'INTEGER',
+        'geometry_json': 'TEXT',
+    })
+
+    # ============================================
     # OPERATORS
     # ============================================
     
@@ -1042,7 +1352,7 @@ def log_scan(station_code: str, raw_data: str, parsed_fields: dict, operator_id:
             part_num, run_name, opening_letter, cabinet_name, cabinet_assembly,
             room_num, cabinet_num, room_code, cabinet_code, cab_type,
             part_name, operator_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         scan_ts,
         station_code,
@@ -1353,25 +1663,13 @@ def _update_station_cycle_from_scan(cursor, station_code: str, scan_dt: datetime
         opening_letter = (parsed_fields.get('opening_letter') or '').strip()
         job_name = (parsed_fields.get('job_name') or '').strip()
 
-        # Coarse assembly unit classification (kept simple + stable)
-        # Rules requested:
-        # - anything containing "door" => Door
-        # - anything containing "drawer" => Drawer Front
-        # - anything containing "dwr"/"drw" => Drawer Box parts
-        pn_lower = part_name.lower()
-        if '*' in part_name:
-            assembly_unit = 'Insert'
-        elif 'tray' in pn_lower:
-            assembly_unit = 'Tray'
-        elif 'door' in pn_lower:
-            assembly_unit = 'Door'
-        elif 'drawer' in pn_lower:
-            assembly_unit = 'Drawer Front'
-        elif 'dwr' in pn_lower or 'drw' in pn_lower:
-            assembly_unit = 'Drawer Box'
-        else:
-            # default: treat as case/box assembly
-            assembly_unit = 'Case'
+        # Assembly unit/group classification (DB-backed rules; first-match-wins)
+        assembly_unit = classify_assembly_unit(
+            part_name=part_name,
+            station_code=station_code,
+            station_display_name=station_display_name,
+            opening_letter=opening_letter,
+        )
         
         if station_display_name:
             cursor.execute('''

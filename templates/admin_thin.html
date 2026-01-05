@@ -186,6 +186,13 @@
         async function detectDongles() {
             setMsg('dongle_msg', 'Detecting…', true);
             try {
+                // Refresh mappings cache first so indicators are accurate
+                try {
+                    const mRes = await fetch('/api/admin/stations');
+                    const mData = await mRes.json();
+                    if (mRes.ok && mData.stations) mappingsCache = mData.stations;
+                } catch(e) { console.warn('Could not refresh mappings for indicators', e); }
+
                 const res = await fetch('/api/admin/dongles/detect');
                 const data = await res.json();
                 if (!res.ok || data.error) {
@@ -195,15 +202,23 @@
                 donglesCache = data.scanners || [];
                 const el = document.getElementById('detected_dongles');
                 el.innerHTML = donglesCache.length
-                    ? donglesCache.map(d => `
-                        <div style="padding: 8px; border-bottom: 1px solid #eee;">
+                    ? donglesCache.map(d => {
+                        const path = (d.stable_path || d.path || '').toString();
+                        const mapped = mappingsCache.find(m => m.device_path === path);
+                        const inUseHtml = mapped 
+                            ? `<span class="pill" style="background:#fef3c7; color:#92400e; margin-left:8px; border:1px solid #fde68a;">Mapped to: <strong>${mapped.station_code}</strong></span>` 
+                            : '';
+                        
+                        return `
+                        <div style="padding: 8px; border-bottom: 1px solid #eee; background: ${mapped ? '#fffcf0' : 'transparent'};">
                             <div style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;">
                                 <strong>${(d.name || 'Unknown')}</strong>
-                                <button class="btn btn-secondary" style="padding:6px 10px;" onclick="useDevice('${String((d.stable_path || d.path || '')).replace(/'/g,'&#39;')}')">Use</button>
+                                ${inUseHtml}
+                                <button class="btn btn-secondary" style="padding:6px 10px; margin-left:auto;" onclick="useDevice('${String(path).replace(/'/g,'&#39;')}')">${mapped ? 'Edit' : 'Use'}</button>
                             </div>
-                            <div class="mono small">${(d.stable_path || d.path || '')}</div>
+                            <div class="mono small">${path}</div>
                         </div>
-                    `).join('')
+                    `;}).join('')
                     : '<em>No devices detected.</em>';
                 setMsg('dongle_msg', `Found ${donglesCache.length} device(s)`, true);
                 populateDeviceList();
