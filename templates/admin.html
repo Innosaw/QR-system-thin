@@ -2017,6 +2017,11 @@
                     return;
                 }
                 setMsg('dongle_msg', 'Station added successfully', true);
+                // Clear form fields
+                if (document.getElementById('add_device')) document.getElementById('add_device').value = '';
+                if (document.getElementById('add_station_code')) document.getElementById('add_station_code').value = '';
+                if (document.getElementById('add_display_name')) document.getElementById('add_display_name').value = '';
+                
                 await loadStations();
                 // Update indicators in detect list
                 if (detectedDonglesCache.length > 0) detectDongles();

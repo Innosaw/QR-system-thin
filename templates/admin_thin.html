@@ -337,8 +337,7 @@
                     return;
                 }
                 setMsg('map_msg', 'Saved mapping.', true);
-                selectedDevicePath = dp;
-                document.getElementById('device_preview').textContent = dp || '(none)';
+                clearForm();
                 await loadMappings();
                 // Refresh detection list to update indicators
                 if (donglesCache.length > 0) renderDongles();
