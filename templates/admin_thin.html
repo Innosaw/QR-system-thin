@@ -239,6 +239,33 @@
                 </ul>
             </div>
         </div>
+
+        <!-- System Updates Section -->
+        <div class="card">
+            <h2>🔄 System Updates</h2>
+            <div class="small">Check for and install the latest Thin Pi software updates from Innosaw.</div>
+            
+            <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                <button class="btn btn-primary" onclick="runSystemUpdate()" id="update_btn">
+                    🔄 Check for Updates
+                </button>
+                <span id="update_status" class="small" style="color:#666;"></span>
+            </div>
+            
+            <div class="msg" id="update_msg" style="margin-top:10px;"></div>
+            
+            <div id="update_output" style="display:none; margin-top:12px; padding:10px; background:#1f2937; color:#e5e7eb; border-radius:6px; font-family:monospace; font-size:12px; max-height:200px; overflow-y:auto; white-space:pre-wrap;"></div>
+            
+            <div class="small" style="margin-top:12px; padding:10px; background:#f0fdf4; border-radius:6px; border:1px solid #86efac;">
+                <strong>ℹ️ What this does:</strong>
+                <ul style="margin:6px 0 0 16px; padding:0;">
+                    <li>Downloads the latest code from Innosaw's servers</li>
+                    <li>Installs any new dependencies</li>
+                    <li>Restarts the Pi service automatically</li>
+                    <li>Your scanner mappings and settings are preserved</li>
+                </ul>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -566,6 +593,63 @@
             const v = (document.getElementById('map_device_input').value || '').trim();
             document.getElementById('device_preview').textContent = v || '(none)';
         });
+
+        // ============= SYSTEM UPDATE FUNCTIONS =============
+
+        async function runSystemUpdate() {
+            const btn = document.getElementById('update_btn');
+            const status = document.getElementById('update_status');
+            const output = document.getElementById('update_output');
+            
+            if (!confirm('This will download and install the latest Thin Pi software.\n\nThe service will restart after the update. You may briefly lose connection to this page.\n\nContinue?')) {
+                return;
+            }
+            
+            btn.disabled = true;
+            btn.textContent = '⏳ Updating...';
+            status.textContent = 'Please wait, this may take a few minutes...';
+            output.style.display = 'none';
+            setMsg('update_msg', '', true);
+            
+            try {
+                const res = await fetch('/api/thin/system/update', { method: 'POST' });
+                const data = await res.json();
+                
+                if (res.ok && data.success) {
+                    setMsg('update_msg', '✅ ' + (data.message || 'Update complete!'), true);
+                    if (data.pull_output) {
+                        output.style.display = 'block';
+                        output.textContent = data.pull_output;
+                    }
+                    status.textContent = 'Update successful!';
+                    
+                    // If service restarted, we might lose connection
+                    if (!data.needs_restart) {
+                        setTimeout(() => {
+                            status.textContent = 'Reconnecting...';
+                            setTimeout(() => location.reload(), 3000);
+                        }, 2000);
+                    }
+                } else {
+                    setMsg('update_msg', '❌ ' + (data.error || 'Update failed'), false);
+                    status.textContent = '';
+                    if (data.error) {
+                        output.style.display = 'block';
+                        output.textContent = data.error;
+                    }
+                }
+            } catch (e) {
+                setMsg('update_msg', '❌ Connection lost - the service may be restarting', false);
+                status.textContent = 'Attempting to reconnect...';
+                // Try to reconnect after a delay
+                setTimeout(() => {
+                    location.reload();
+                }, 5000);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔄 Check for Updates';
+            }
+        }
 
         // ============= NETWORK SETTINGS FUNCTIONS =============
 

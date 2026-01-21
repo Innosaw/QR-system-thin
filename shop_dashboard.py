@@ -2870,18 +2870,54 @@ def thin_wifi_connect():
     if not ssid:
         return jsonify({'error': 'SSID is required'}), 400
 
-    # Try to connect (nmcli handles WPA/WPA2 automatically)
-    # Use sudo for network control operations
-    args = ['device', 'wifi', 'connect', ssid]
+    import subprocess
+    
+    # First, try to delete any existing connection with this name (ignore errors)
+    subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], 
+                   capture_output=True, timeout=10)
+    
+    # Create a new connection profile with proper security settings
     if password:
-        args += ['password', password]
-
-    ok, out, err = _run_nmcli(args, timeout=30, use_sudo=True)
-    if not ok:
-        # Check for common errors
-        if 'Secrets were required' in err or 'password' in err.lower():
-            return jsonify({'error': 'Incorrect password or password required'}), 400
-        return jsonify({'error': err or 'Failed to connect to WiFi'}), 400
+        # WPA/WPA2 network - create connection with proper security
+        cmd = [
+            'sudo', 'nmcli', 'connection', 'add',
+            'type', 'wifi',
+            'con-name', ssid,
+            'ssid', ssid,
+            'wifi-sec.key-mgmt', 'wpa-psk',
+            'wifi-sec.psk', password
+        ]
+    else:
+        # Open network
+        cmd = [
+            'sudo', 'nmcli', 'connection', 'add',
+            'type', 'wifi',
+            'con-name', ssid,
+            'ssid', ssid
+        ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode != 0:
+            return jsonify({'error': result.stderr.strip() or 'Failed to create connection'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+    
+    # Now activate the connection
+    try:
+        result = subprocess.run(
+            ['sudo', 'nmcli', 'connection', 'up', ssid],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            err = result.stderr.strip()
+            if 'Secrets were required' in err or 'password' in err.lower():
+                return jsonify({'error': 'Incorrect password'}), 400
+            return jsonify({'error': err or 'Failed to connect'}), 400
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Connection timed out'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
     return jsonify({'success': True, 'message': f'Connected to {ssid}'}), 200
 
@@ -2970,6 +3006,73 @@ def thin_network_saved():
             })
 
     return jsonify({'connections': connections}), 200
+
+
+@app.route('/api/thin/system/update', methods=['POST'])
+def thin_system_update():
+    """Pull latest code and reinstall the thin Pi software."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+
+    if platform.system() != 'Linux':
+        return jsonify({'error': 'System update only available on Linux/Pi'}), 400
+
+    import subprocess
+    
+    try:
+        # Get the install directory (where this script is running from)
+        install_dir = Path(__file__).resolve().parent
+        
+        # First, git pull to get latest code
+        pull_result = subprocess.run(
+            ['git', 'pull'],
+            cwd=str(install_dir),
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        pull_output = pull_result.stdout.strip()
+        if pull_result.returncode != 0:
+            return jsonify({
+                'error': f'Git pull failed: {pull_result.stderr.strip()}',
+                'success': False
+            }), 400
+        
+        # Check if thin_pi install script exists
+        install_script = install_dir / 'thin_pi' / 'install_thin_pi.sh'
+        if not install_script.exists():
+            return jsonify({
+                'success': True,
+                'message': f'Code updated. {pull_output}',
+                'needs_restart': True
+            }), 200
+        
+        # Run the install script to apply updates
+        install_result = subprocess.run(
+            ['sudo', 'bash', str(install_script)],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minutes max
+        )
+        
+        if install_result.returncode != 0:
+            return jsonify({
+                'error': f'Install failed: {install_result.stderr.strip()[-500:]}',
+                'success': False
+            }), 400
+        
+        return jsonify({
+            'success': True,
+            'message': 'Update complete! The service will restart automatically.',
+            'pull_output': pull_output,
+            'needs_restart': False  # install script restarts the service
+        }), 200
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Update timed out', 'success': False}), 400
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 400
 
 
 @app.route('/api/admin/password/check', methods=['POST'])
