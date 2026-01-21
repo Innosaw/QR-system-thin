@@ -622,6 +622,16 @@
             }
         }
 
+        // Trigger a background WiFi rescan when page loads so first scan shows all networks
+        async function triggerBackgroundWifiRescan() {
+            try {
+                // Just trigger rescan - don't wait for or display results
+                await fetch('/api/thin/network/wifi/scan');
+            } catch (e) {
+                // Ignore errors - this is just a background warmup
+            }
+        }
+
         async function scanWifi() {
             setMsg('wifi_msg', 'Scanning for networks (this takes a few seconds)…', true);
             const container = document.getElementById('wifi_networks');
@@ -675,6 +685,27 @@
             return (str || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
         }
 
+        function showNetworkChangeWarning(newSSID) {
+            const msg = `⚠️ IMPORTANT: Changing WiFi Networks
+
+When you connect to "${newSSID}", the Pi will get a NEW IP address and you will lose access to this page.
+
+TO FIND THE NEW IP ADDRESS:
+1. Connect a monitor/TV to the Pi's HDMI port
+2. The IP address will be displayed on screen
+3. Access the Pi at the new address: http://[NEW-IP]:5006/admin
+
+RECOMMENDED: Set a static IP in your router
+• Log into your router (usually 192.168.1.1 or 192.168.0.1)
+• Find DHCP Reservation or Static IP settings
+• Assign a fixed IP to the Pi's MAC address
+• This ensures the IP never changes
+
+Do you want to proceed with connecting to ${newSSID}?`;
+
+            return confirm(msg);
+        }
+
         function showWifiConnect(ssid, isOpen) {
             selectedWifiSSID = ssid;
             document.getElementById('wifi_connect_ssid').textContent = ssid;
@@ -712,6 +743,9 @@
                 return;
             }
 
+            // Show warning about IP address change
+            if (!showNetworkChangeWarning(ssid)) return;
+
             setMsg('wifi_msg', `Connecting to ${ssid}…`, true);
 
             try {
@@ -737,6 +771,9 @@
         async function connectToWifi() {
             if (!selectedWifiSSID) return;
             const password = document.getElementById('wifi_password').value;
+
+            // Show warning about IP address change
+            if (!showNetworkChangeWarning(selectedWifiSSID)) return;
 
             setMsg('wifi_msg', `Connecting to ${selectedWifiSSID}…`, true);
 
@@ -854,10 +891,10 @@
         // Load network status on page load
         refreshNetworkStatus();
         loadSavedNetworks();
+        // Trigger WiFi rescan in background so first scan shows all networks
+        triggerBackgroundWifiRescan();
         // Optional auto-detect on load
         // detectDongles();
     </script>
 </body>
 </html>
-
-
