@@ -3056,9 +3056,22 @@ def thin_system_update():
             timeout=300  # 5 minutes max
         )
         
+        full_output = (install_result.stdout + '\n' + install_result.stderr).strip()
+        
+        # Exit code -15 means killed by SIGTERM - this happens when systemctl restart
+        # kills this process. If we see "[7/7]" in output, the update succeeded.
+        if install_result.returncode == -15 or install_result.returncode == 143:
+            # 143 = 128 + 15 (SIGTERM), -15 = killed by signal 15
+            if '[7/7]' in full_output or 'Systemd service' in full_output:
+                return jsonify({
+                    'success': True,
+                    'message': 'Update complete! Service restarted.',
+                    'pull_output': pull_output,
+                    'install_output': full_output[-500:],
+                    'needs_restart': False
+                }), 200
+        
         if install_result.returncode != 0:
-            # Combine stdout and stderr for full error info
-            full_output = (install_result.stdout + '\n' + install_result.stderr).strip()
             # Get last 1000 chars to show meaningful error
             error_snippet = full_output[-1000:] if len(full_output) > 1000 else full_output
             return jsonify({
