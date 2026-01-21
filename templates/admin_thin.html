@@ -173,12 +173,33 @@
                     <strong>📶 WiFi Networks</strong>
                     <div class="row" style="gap:8px;">
                         <button class="btn btn-primary" onclick="scanWifi()" style="padding:6px 12px;">Scan</button>
-                        <button class="btn btn-secondary" onclick="disconnectWifi()" style="padding:6px 12px;">Disconnect WiFi</button>
+                        <button class="btn btn-secondary" onclick="showManualWifi()" style="padding:6px 12px;">Manual</button>
+                        <button class="btn btn-secondary" onclick="disconnectWifi()" style="padding:6px 12px;">Disconnect</button>
                     </div>
                 </div>
                 <div class="msg" id="wifi_msg"></div>
                 <div id="wifi_networks" style="margin-top:10px; max-height:300px; overflow-y:auto; border:1px solid #eee; border-radius:6px;">
                     <div style="padding:12px; color:#666; text-align:center;">Click "Scan" to find available WiFi networks</div>
+                </div>
+            </div>
+
+            <!-- Manual WiFi Configuration -->
+            <div id="wifi_manual_form" style="display:none; margin-top:16px; padding:12px; background:#fef3c7; border-radius:8px; border:1px solid #fbbf24;">
+                <div style="font-weight:600; margin-bottom:8px;">📝 Manual WiFi Configuration</div>
+                <div class="small" style="margin-bottom:10px;">Use this if your network doesn't appear in the scan (hidden SSID or weak signal).</div>
+                <div class="row" style="gap:10px; flex-wrap:wrap;">
+                    <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+                        <label>Network Name (SSID)</label>
+                        <input type="text" id="wifi_manual_ssid" placeholder="Enter WiFi name" />
+                    </div>
+                    <div class="field" style="flex:1; min-width:180px; margin-bottom:0;">
+                        <label>Password</label>
+                        <input type="password" id="wifi_manual_password" placeholder="Enter password (or leave blank)" />
+                    </div>
+                </div>
+                <div class="row" style="gap:8px; margin-top:10px;">
+                    <button class="btn btn-primary" onclick="connectManualWifi()">Connect</button>
+                    <button class="btn btn-secondary" onclick="cancelManualWifi()">Cancel</button>
                 </div>
             </div>
 
@@ -659,6 +680,7 @@
             document.getElementById('wifi_connect_ssid').textContent = ssid;
             document.getElementById('wifi_password').value = '';
             document.getElementById('wifi_connect_form').style.display = 'block';
+            document.getElementById('wifi_manual_form').style.display = 'none';
             if (!isOpen) {
                 document.getElementById('wifi_password').focus();
             }
@@ -667,6 +689,49 @@
         function cancelWifiConnect() {
             selectedWifiSSID = '';
             document.getElementById('wifi_connect_form').style.display = 'none';
+        }
+
+        function showManualWifi() {
+            document.getElementById('wifi_manual_form').style.display = 'block';
+            document.getElementById('wifi_connect_form').style.display = 'none';
+            document.getElementById('wifi_manual_ssid').value = '';
+            document.getElementById('wifi_manual_password').value = '';
+            document.getElementById('wifi_manual_ssid').focus();
+        }
+
+        function cancelManualWifi() {
+            document.getElementById('wifi_manual_form').style.display = 'none';
+        }
+
+        async function connectManualWifi() {
+            const ssid = document.getElementById('wifi_manual_ssid').value.trim();
+            const password = document.getElementById('wifi_manual_password').value;
+
+            if (!ssid) {
+                setMsg('wifi_msg', 'Please enter the network name (SSID)', false);
+                return;
+            }
+
+            setMsg('wifi_msg', `Connecting to ${ssid}…`, true);
+
+            try {
+                const res = await fetch('/api/thin/network/wifi/connect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ssid, password })
+                });
+                const data = await res.json();
+
+                if (res.ok && !data.error) {
+                    setMsg('wifi_msg', `Connected to ${ssid}!`, true);
+                    cancelManualWifi();
+                    setTimeout(() => { refreshNetworkStatus(); scanWifi(); }, 2000);
+                } else {
+                    setMsg('wifi_msg', data.error || 'Failed to connect', false);
+                }
+            } catch (e) {
+                setMsg('wifi_msg', e.message, false);
+            }
         }
 
         async function connectToWifi() {
