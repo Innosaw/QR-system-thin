@@ -617,9 +617,9 @@
                 
                 if (res.ok && data.success) {
                     setMsg('update_msg', '✅ ' + (data.message || 'Update complete!'), true);
-                    if (data.pull_output) {
+                    if (data.pull_output || data.install_output) {
                         output.style.display = 'block';
-                        output.textContent = data.pull_output;
+                        output.textContent = (data.pull_output || '') + '\n' + (data.install_output || '');
                     }
                     status.textContent = 'Update successful!';
                     
@@ -633,10 +633,9 @@
                 } else {
                     setMsg('update_msg', '❌ ' + (data.error || 'Update failed'), false);
                     status.textContent = '';
-                    if (data.error) {
-                        output.style.display = 'block';
-                        output.textContent = data.error;
-                    }
+                    // Show full details if available
+                    output.style.display = 'block';
+                    output.textContent = data.details || data.error || 'Unknown error';
                 }
             } catch (e) {
                 setMsg('update_msg', '❌ Connection lost - the service may be restarting', false);

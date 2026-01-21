@@ -3057,8 +3057,13 @@ def thin_system_update():
         )
         
         if install_result.returncode != 0:
+            # Combine stdout and stderr for full error info
+            full_output = (install_result.stdout + '\n' + install_result.stderr).strip()
+            # Get last 1000 chars to show meaningful error
+            error_snippet = full_output[-1000:] if len(full_output) > 1000 else full_output
             return jsonify({
-                'error': f'Install failed: {install_result.stderr.strip()[-500:]}',
+                'error': f'Install failed (exit code {install_result.returncode})',
+                'details': error_snippet,
                 'success': False
             }), 400
         
@@ -3066,6 +3071,7 @@ def thin_system_update():
             'success': True,
             'message': 'Update complete! The service will restart automatically.',
             'pull_output': pull_output,
+            'install_output': install_result.stdout.strip()[-500:],
             'needs_restart': False  # install script restarts the service
         }), 200
         
