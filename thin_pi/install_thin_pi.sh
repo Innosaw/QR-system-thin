@@ -40,31 +40,32 @@ if [[ ! -d "${INSTALL_DIR}/.git" ]]; then
     cd \"${INSTALL_DIR}\"
     git clone --depth 1 --filter=blob:none --sparse \"${REPO_URL}\" .
     # We need non-cone mode because we include individual files at repo root.
+    # Leading slashes required for no-cone mode paths.
     git sparse-checkout init --no-cone
     git sparse-checkout set \
-      qr_scanner.py \
-      multi_scanner_manager.py \
-      detect_dongles.py \
-      shop_dashboard.py \
-      authz.py \
-      path_utils.py \
-      bin_management.py \
-      database_schema.py \
-      cloud_v2/pi_client.py \
-      static/common.css \
-      templates/admin.html \
-      templates/admin_thin.html \
-      templates/admin_login.html \
-      templates/help_thin.html \
-      templates/shop_dashboard.html \
-      templates/shop_dashboard_thin.html \
-      templates/raw_scans_thin.html \
-      config.example.json \
-      thin_pi/THIN_PI_SETUP_GUIDE.md \
-      thin_pi/thin_pi_runtime.py \
-      thin_pi/requirements.txt \
-      thin_pi/innosaw-thin.service \
-      thin_pi/install_thin_pi.sh
+      /qr_scanner.py \
+      /multi_scanner_manager.py \
+      /detect_dongles.py \
+      /shop_dashboard.py \
+      /authz.py \
+      /path_utils.py \
+      /bin_management.py \
+      /database_schema.py \
+      /cloud_v2/pi_client.py \
+      /static/common.css \
+      /templates/admin.html \
+      /templates/admin_thin.html \
+      /templates/admin_login.html \
+      /templates/help_thin.html \
+      /templates/shop_dashboard.html \
+      /templates/shop_dashboard_thin.html \
+      /templates/raw_scans_thin.html \
+      /config.example.json \
+      /thin_pi/THIN_PI_SETUP_GUIDE.md \
+      /thin_pi/thin_pi_runtime.py \
+      /thin_pi/requirements.txt \
+      /thin_pi/innosaw-thin.service \
+      /thin_pi/install_thin_pi.sh
   "
 else
   # Existing install: refresh sparse-checkout list so newly added thin templates are included.
@@ -72,29 +73,29 @@ else
     cd \"${INSTALL_DIR}\"
     git sparse-checkout init --no-cone || true
     git sparse-checkout set \
-      qr_scanner.py \
-      multi_scanner_manager.py \
-      detect_dongles.py \
-      shop_dashboard.py \
-      authz.py \
-      path_utils.py \
-      bin_management.py \
-      database_schema.py \
-      cloud_v2/pi_client.py \
-      static/common.css \
-      templates/admin.html \
-      templates/admin_thin.html \
-      templates/admin_login.html \
-      templates/help_thin.html \
-      templates/shop_dashboard.html \
-      templates/shop_dashboard_thin.html \
-      templates/raw_scans_thin.html \
-      config.example.json \
-      thin_pi/THIN_PI_SETUP_GUIDE.md \
-      thin_pi/thin_pi_runtime.py \
-      thin_pi/requirements.txt \
-      thin_pi/innosaw-thin.service \
-      thin_pi/install_thin_pi.sh
+      /qr_scanner.py \
+      /multi_scanner_manager.py \
+      /detect_dongles.py \
+      /shop_dashboard.py \
+      /authz.py \
+      /path_utils.py \
+      /bin_management.py \
+      /database_schema.py \
+      /cloud_v2/pi_client.py \
+      /static/common.css \
+      /templates/admin.html \
+      /templates/admin_thin.html \
+      /templates/admin_login.html \
+      /templates/help_thin.html \
+      /templates/shop_dashboard.html \
+      /templates/shop_dashboard_thin.html \
+      /templates/raw_scans_thin.html \
+      /config.example.json \
+      /thin_pi/THIN_PI_SETUP_GUIDE.md \
+      /thin_pi/thin_pi_runtime.py \
+      /thin_pi/requirements.txt \
+      /thin_pi/innosaw-thin.service \
+      /thin_pi/install_thin_pi.sh
     git pull
   "
 fi
