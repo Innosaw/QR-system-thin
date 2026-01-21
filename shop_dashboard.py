@@ -2720,12 +2720,13 @@ def thin_cloud_stations():
 # NETWORK SETTINGS (for headless thin Pi units)
 # =============================================================================
 
-def _run_nmcli(args: list, timeout: int = 15) -> tuple:
+def _run_nmcli(args: list, timeout: int = 15, use_sudo: bool = False) -> tuple:
     """Run nmcli command and return (success, stdout, stderr)."""
     import subprocess
     try:
+        cmd = ['sudo', 'nmcli'] + args if use_sudo else ['nmcli'] + args
         result = subprocess.run(
-            ['nmcli'] + args,
+            cmd,
             capture_output=True,
             text=True,
             timeout=timeout
@@ -2870,11 +2871,12 @@ def thin_wifi_connect():
         return jsonify({'error': 'SSID is required'}), 400
 
     # Try to connect (nmcli handles WPA/WPA2 automatically)
+    # Use sudo for network control operations
     args = ['device', 'wifi', 'connect', ssid]
     if password:
         args += ['password', password]
 
-    ok, out, err = _run_nmcli(args, timeout=30)
+    ok, out, err = _run_nmcli(args, timeout=30, use_sudo=True)
     if not ok:
         # Check for common errors
         if 'Secrets were required' in err or 'password' in err.lower():
@@ -2906,7 +2908,7 @@ def thin_wifi_disconnect():
     if not wlan_device:
         return jsonify({'error': 'No WiFi device found'}), 400
 
-    ok, out, err = _run_nmcli(['device', 'disconnect', wlan_device])
+    ok, out, err = _run_nmcli(['device', 'disconnect', wlan_device], use_sudo=True)
     if not ok:
         return jsonify({'error': err or 'Failed to disconnect WiFi'}), 400
 
@@ -2928,7 +2930,7 @@ def thin_wifi_forget():
     if not ssid:
         return jsonify({'error': 'SSID is required'}), 400
 
-    ok, out, err = _run_nmcli(['connection', 'delete', ssid])
+    ok, out, err = _run_nmcli(['connection', 'delete', ssid], use_sudo=True)
     if not ok:
         # Not an error if the connection wasn't saved
         if 'not found' in err.lower():
