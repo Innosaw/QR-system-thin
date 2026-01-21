@@ -14,6 +14,7 @@ import re
 from datetime import datetime
 from queue import Queue, Full
 from pathlib import Path
+from typing import Optional
 from path_utils import get_base_dir, resolve_path
 
 # Camera-mode dependencies are lazy-loaded so barcode-only deployments don't
