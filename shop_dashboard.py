@@ -2813,12 +2813,19 @@ def thin_wifi_scan():
     if platform.system() != 'Linux':
         return jsonify({'error': 'Network settings only available on Linux/Pi'}), 400
 
-    # Trigger a fresh scan first
-    _run_nmcli(['device', 'wifi', 'rescan'], timeout=10)
+    # Trigger a fresh scan first (need sudo for best results)
+    import subprocess
+    try:
+        # Try with sudo first for better scan results
+        subprocess.run(['sudo', 'nmcli', 'device', 'wifi', 'rescan'], timeout=10, capture_output=True)
+    except Exception:
+        _run_nmcli(['device', 'wifi', 'rescan'], timeout=10)
+    
     import time
-    time.sleep(2)  # Wait for scan to complete
+    time.sleep(3)  # Wait longer for scan to complete
 
-    ok, out, err = _run_nmcli(['-t', '-f', 'SSID,SIGNAL,SECURITY,IN-USE', 'device', 'wifi', 'list'])
+    # Use --rescan yes to force fresh results
+    ok, out, err = _run_nmcli(['-t', '-f', 'SSID,SIGNAL,SECURITY,IN-USE', 'device', 'wifi', 'list', '--rescan', 'no'])
     if not ok:
         return jsonify({'error': err or 'Failed to scan WiFi networks', 'networks': []}), 500
 
