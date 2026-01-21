@@ -60,7 +60,7 @@ class CloudV2ScanSink:
         resp = self.session.post(url, headers=self._headers(), json=payload, timeout=self.timeout)
         if resp.status_code >= 200 and resp.status_code < 300:
             return True
-        logging.warning("Cloud v2 rejected scan: HTTP %s %s", resp.status_code, (resp.text or "")[:200])
+            logging.warning("Cloud v2 rejected scan: HTTP %s (body truncated)", resp.status_code)
         return False
 
     def _enqueue(self, payload: Dict[str, Any]) -> None:

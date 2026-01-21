@@ -78,11 +78,34 @@
 sudo bash install_thin_pi.sh</pre>
     </div>
 
-    <div class="card" id="wifi">
-      <div class="h2">Wi‑Fi setup (if you shipped Ethernet-first)</div>
+    <div class="card" id="network">
+      <div class="h2">🌐 Network Settings (Web UI - Recommended)</div>
       <div class="muted">
-        Recommended: do first-time setup on <strong>Ethernet</strong>, then switch to Wi‑Fi only if needed.
-        If you need Wi‑Fi, here are the simplest options (pick one).
+        The easiest way to configure WiFi on your Thin Pi — <strong>no terminal or SSH required</strong>.
+      </div>
+      <ol style="margin-top:10px;">
+        <li><strong>Connect via Ethernet first</strong>: Plug an Ethernet cable into the Pi and your router.</li>
+        <li><strong>Find the Pi's IP</strong>: Check your router's connected devices list, or plug in an HDMI monitor to see it.</li>
+        <li><strong>Open the Admin page</strong>: Go to <span class="mono">http://&lt;pi-ip&gt;:5006/admin</span> in your browser.</li>
+        <li><strong>Scroll to "Network Settings"</strong>: You'll see your current connection status.</li>
+        <li><strong>Click "Scan"</strong> under WiFi Networks to find available networks.</li>
+        <li><strong>Click "Connect"</strong> on your WiFi network, enter the password, and click Connect.</li>
+        <li><strong>Unplug Ethernet</strong>: Once WiFi shows as connected, you can remove the Ethernet cable.</li>
+      </ol>
+      <div class="muted" style="margin-top:10px; padding:10px; background:#fffbeb; border-radius:6px;">
+        <strong>💡 Tips:</strong>
+        <ul style="margin:4px 0 0 16px; padding:0;">
+          <li>The Pi will auto-reconnect to saved WiFi networks on reboot</li>
+          <li>If you lose WiFi access, plug Ethernet back in to reconfigure</li>
+          <li>You can have both Ethernet and WiFi connected at the same time</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" id="wifi">
+      <div class="h2">Wi‑Fi setup (Terminal/SSH Methods)</div>
+      <div class="muted">
+        If you prefer terminal commands or can't access the web UI, here are alternative methods.
       </div>
       <ol style="margin-top:10px;">
         <li>

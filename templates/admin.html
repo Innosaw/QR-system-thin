@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - Manufacturing Dashboard</title>
     <link rel="stylesheet" href="/static/common.css?v=20251222">
+    <link rel="stylesheet" href="/static/contextual-help.css?v=20260118b">
     <script>
         // Prevent a flash of the raw sections before the sidebar layout is initialized.
         try {
@@ -116,11 +117,12 @@
         <div class="subtitle">Operators, backups, and safe maintenance tools</div>
         <div class="nav_primary">
             <a class="nav_btn" href="/">Dashboard</a>
-            <a class="nav_btn ext-link" data-port="5000" data-path="/" href="/bins">Bins</a>
             <a class="nav_btn" href="/reports">Reports</a>
+            <a id="shop_link" class="nav_btn" href="/">Office</a>
+            <a class="nav_btn" href="/labels">Labels</a>
             <a class="nav_btn active" href="/admin">Admin</a>
             <a class="nav_btn" href="/help">Help</a>
-            <a class="nav_btn" href="https://v2.innosaw.work/" target="_blank" rel="noopener noreferrer">License this software</a>
+            <a class="nav_btn ext-link" data-port="5000" data-path="/" href="/bins">Bins</a>
             <span class="nav_spacer"></span>
             <button id="auth_btn" class="nav_btn" type="button" onclick="innosawAuthClick()">Login</button>
         </div>
@@ -130,6 +132,7 @@
         <a class="nav_btn" href="/scans">Scan Log</a>
         <a class="nav_btn" href="/mobile">Mobile Scan</a>
         <a class="nav_btn" href="/reports">Reports</a>
+        <a class="nav_btn" href="/labels">Labels</a>
         <a class="nav_btn" href="/raw_scans">Raw Scans</a>
     </div>
     <script>
@@ -201,7 +204,7 @@
         </div>
 
         <div class="card">
-            <h2>Operator Badge Barcodes</h2>
+            <h2>Operator Badge Barcodes <span class="help-icon" data-help-topic="barcode-mapping">?</span></h2>
             <div class="subtitle" style="margin-bottom: 10px;">
                 Map a scanned badge barcode to an Operator ID. After saving, scanning that barcode will set the current operator for today.
             </div>
@@ -328,7 +331,7 @@
                 </div>
                 <div class="field">
                     <label>Scans: Station (optional)</label>
-                    <input id="purge_station" placeholder="H08">
+                    <input id="purge_station" placeholder="CNC">
                 </div>
                 <div class="field">
                     <label>Scans: Job contains (optional)</label>
@@ -426,6 +429,10 @@
                     <input type="number" id="admin_bin_num_size" style="width:100px;" value="15">
                 </div>
                 <div class="field">
+                    <label>Bin # Color</label>
+                    <input type="color" id="admin_bin_num_color" value="#e5e7eb" style="width:60px; height:36px; padding:2px;">
+                </div>
+                <div class="field">
                     <label>Job/Cab Size (px)</label>
                     <input type="number" id="admin_bin_content_size" style="width:100px;" value="16">
                 </div>
@@ -460,14 +467,139 @@
         </div>
 
         <div class="card">
+            <h2>Bin Card Designer</h2>
+            <div class="subtitle" style="margin-bottom: 10px;">
+                Configure which variables appear on bin cards, their order, size, and format. Similar to kiosk widget configuration.
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button class="btn btn-primary" onclick="binCardDesignerSave()">Save Configuration</button>
+                    <button class="btn btn-secondary" onclick="binCardDesignerLoad()">Load / Refresh</button>
+                    <button class="btn btn-secondary" onclick="binCardDesignerReset()">Reset to Defaults</button>
+                </div>
+                
+                <div style="background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+                    <h3 style="margin-top: 0; margin-bottom: 10px; font-size: 14px; font-weight: 800;">Available Variables</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px;">
+                        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="binCardDesignerAddVariable('job_name')">+ Job Name</button>
+                        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="binCardDesignerAddVariable('cabinet_name')">+ Cabinet Name</button>
+                        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="binCardDesignerAddVariable('cabinet_number')">+ Cabinet Number</button>
+                        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="binCardDesignerAddVariable('cabinet_assembly')">+ Cabinet Assembly</button>
+                        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="binCardDesignerAddVariable('part_name')">+ Part Name</button>
+                        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="binCardDesignerAddVariable('part_number')">+ Part Number</button>
+                        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="binCardDesignerAddVariable('room_name')">+ Room Name</button>
+                        <button class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" onclick="binCardDesignerAddVariable('room_number')">+ Room Number</button>
+                    </div>
+                </div>
+                
+                <div style="background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px;">
+                    <h3 style="margin-top: 0; margin-bottom: 10px; font-size: 14px; font-weight: 800;">Card Fields (drag to reorder)</h3>
+                    <div id="bin_card_fields_list" style="min-height: 100px;">
+                        <div style="color: #666; padding: 20px; text-align: center;">No fields added yet. Click a variable above to add it.</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="msg" id="bin_card_designer_msg"></div>
+        </div>
+
+        <div class="card">
+            <h2>Reports Dashboard</h2>
+            <div class="subtitle" style="margin-bottom: 10px;">
+                Customize the “last metric” line shown on each station card on <code>/reports</code> (e.g. CNC uses sheet processing time instead of gap time).
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 900px;">
+                <div>
+                    <div style="font-weight:600; margin-bottom: 6px;">Default stations</div>
+                    <div class="row" style="gap:10px; align-items:end;">
+                        <div class="field" style="flex:1;">
+                            <label>Metric source</label>
+                            <select id="reports_metric_default_source" style="width:100%;">
+                                <option value="gap_avg_seconds">Gap time (avg)</option>
+                                <option value="sheet_avg_seconds">Sheet processing time (avg)</option>
+                                <option value="assembly_avg_seconds">Assembly time (avg)</option>
+                            </select>
+                        </div>
+                        <div class="field" style="flex:1;">
+                            <label>Label</label>
+                            <input id="reports_metric_default_label" type="text" placeholder="Avg Gap" style="width:100%;">
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="font-weight:600; margin-bottom: 6px;">CNC stations (profile: cnc)</div>
+                    <div class="row" style="gap:10px; align-items:end;">
+                        <div class="field" style="flex:1;">
+                            <label>Metric source</label>
+                            <select id="reports_metric_cnc_source" style="width:100%;">
+                                <option value="gap_avg_seconds">Gap time (avg)</option>
+                                <option value="sheet_avg_seconds">Sheet processing time (avg)</option>
+                                <option value="assembly_avg_seconds">Assembly time (avg)</option>
+                            </select>
+                        </div>
+                        <div class="field" style="flex:1;">
+                            <label>Label</label>
+                            <input id="reports_metric_cnc_label" type="text" placeholder="Avg Sheet" style="width:100%;">
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="font-weight:600; margin-bottom: 6px;">Assembly stations (profile: assembly)</div>
+                    <div class="row" style="gap:10px; align-items:end;">
+                        <div class="field" style="flex:1;">
+                            <label>Metric source</label>
+                            <select id="reports_metric_assembly_source" style="width:100%;">
+                                <option value="gap_avg_seconds">Gap time (avg)</option>
+                                <option value="sheet_avg_seconds">Sheet processing time (avg)</option>
+                                <option value="assembly_avg_seconds">Assembly time (avg)</option>
+                            </select>
+                        </div>
+                        <div class="field" style="flex:1;">
+                            <label>Label</label>
+                            <input id="reports_metric_assembly_label" type="text" placeholder="Avg Assembly" style="width:100%;">
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display:flex; flex-direction:column; justify-content:flex-end;">
+                    <div class="row" style="gap:10px;">
+                        <button class="btn btn-secondary" type="button" onclick="reportsConfigLoad()">Load / Refresh</button>
+                        <button class="btn btn-primary" type="button" onclick="reportsConfigSave()">Save</button>
+                    </div>
+                    <div id="reports_cfg_msg" class="msg" style="margin-top: 8px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
             <h2>Cabinet Library</h2>
-            <div class="subtitle" style="margin-bottom: 10px;">Import cabinet-type required parts (CSV) into the bin manager</div>
+            <div class="subtitle" style="margin-bottom: 10px;">Import cabinet-type required parts from CSV or Mozaik .moz files</div>
             <div class="row">
                 <div class="field">
                     <label>Cabinet Library CSV</label>
                     <input id="cabinet_csv" type="file" accept=".csv">
                 </div>
                 <button class="btn btn-primary" onclick="importCabinetLibraryCsv()">Import CSV</button>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+                <div class="field">
+                    <label>Mozaik .moz Files (or ZIP folder)</label>
+                    <input id="cabinet_moz" type="file" accept=".moz,.zip" multiple>
+                    <div class="small" style="margin-top: 4px; color: #666;">Select .moz files or a ZIP containing .moz files</div>
+                </div>
+                <button class="btn btn-primary" onclick="importCabinetLibraryMoz()">Import .moz Files</button>
+            </div>
+            <div class="row" style="margin-top: 10px;">
+                <div class="field">
+                    <label>Mozaik Product Library Folder</label>
+                    <input id="cabinet_moz_folder" type="file" webkitdirectory directory multiple accept=".moz">
+                    <div class="small" style="margin-top: 4px; color: #666;">Select a folder containing .moz files (parses all at once, overwrites matching cabinet names)</div>
+                </div>
+                <button class="btn btn-primary" onclick="importCabinetLibraryMozFolder()">Import Folder</button>
             </div>
             <div class="msg" id="cabinet_msg"></div>
         </div>
@@ -495,7 +627,21 @@
                     <label>Qty</label>
                     <input id="lib_add_qty" type="number" min="1" value="1">
                 </div>
-                <div class="field" style="width: 180px;">
+                <div class="field" style="width: 140px;">
+                    <label>Category</label>
+                    <select id="lib_add_category">
+                        <option value="panel">Panel</option>
+                        <option value="case">Case</option>
+                        <option value="drawer">Drawer</option>
+                        <option value="drawer_front">Drawer Front</option>
+                        <option value="door">Door</option>
+                        <option value="insert">Insert</option>
+                        <option value="stretcher">Stretcher</option>
+                        <option value="back">Back</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="field" style="width: 140px;">
                     <label>Excluded?</label>
                     <select id="lib_add_excluded">
                         <option value="0" selected>No (case part)</option>
@@ -539,7 +685,7 @@
                 </div>
                 <div class="field">
                     <label>Recuts: Machine (optional)</label>
-                    <input id="recut_purge_machine" placeholder="H08">
+                    <input id="recut_purge_machine" placeholder="CNC">
                 </div>
                 <div class="field">
                     <label>Recuts: Job contains (optional)</label>
@@ -558,7 +704,7 @@
         </div>
 
         <div class="card">
-            <h2>Stations / Barcode mapping</h2>
+            <h2>Stations / Barcode mapping <span class="help-icon" data-help-topic="barcode-mapping">?</span></h2>
             <div class="row">
                 <button class="btn btn-primary" onclick="detectDongles()">Detect USB Dongles</button>
                 <button class="btn btn-secondary" onclick="loadStations()">Refresh Stations</button>
@@ -580,7 +726,7 @@
                 </div>
                 <div class="field">
                     <label>Display Name</label>
-                    <input id="add_display_name" placeholder="H08" style="width: 140px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                    <input id="add_display_name" placeholder="CNC" style="width: 140px; padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
                 </div>
                 <button class="btn btn-primary" onclick="addStation()">Add Station</button>
             </div>
@@ -1056,6 +1202,91 @@
             }
         }
 
+        async function importCabinetLibraryMoz() {
+            const input = document.getElementById('cabinet_moz');
+            if (!input || !input.files || input.files.length === 0) {
+                setMsg('cabinet_msg', 'Please choose .moz files or a ZIP file first.', false);
+                return;
+            }
+
+            const formData = new FormData();
+            for (let i = 0; i < input.files.length; i++) {
+                formData.append('moz_files', input.files[i]);
+            }
+            formData.append('overwrite_matching', 'true'); // Overwrite matching cabinet names
+
+            setMsg('cabinet_msg', 'Importing .moz files…', true);
+            try {
+                const res = await fetch('/api/bin_manager/import_cabinet_library_moz', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('cabinet_msg', data.error || 'Import failed.', false);
+                    return;
+                }
+                if (data.success) {
+                    const ct = data.cabinet_types ?? 0;
+                    const parts = data.parts_imported ?? 0;
+                    const files = data.files_processed ?? 0;
+                    setMsg('cabinet_msg', `Imported ${ct} cabinet types, ${parts} parts from ${files} .moz files.`, true);
+                    await loadCabinetLibraryAdmin(); // Refresh editor
+                } else {
+                    setMsg('cabinet_msg', data.error || 'Import failed.', false);
+                }
+            } catch (e) {
+                setMsg('cabinet_msg', 'Import error: ' + (e?.message || e), false);
+            }
+        }
+
+        async function importCabinetLibraryMozFolder() {
+            const input = document.getElementById('cabinet_moz_folder');
+            if (!input || !input.files || input.files.length === 0) {
+                setMsg('cabinet_msg', 'Please select a folder containing .moz files first.', false);
+                return;
+            }
+
+            const formData = new FormData();
+            for (let i = 0; i < input.files.length; i++) {
+                const file = input.files[i];
+                if (file.name.toLowerCase().endsWith('.moz')) {
+                    formData.append('moz_files', file);
+                }
+            }
+            formData.append('overwrite_matching', 'true'); // Overwrite matching cabinet names
+
+            const mozCount = Array.from(input.files).filter(f => f.name.toLowerCase().endsWith('.moz')).length;
+            if (mozCount === 0) {
+                setMsg('cabinet_msg', 'No .moz files found in selected folder.', false);
+                return;
+            }
+
+            setMsg('cabinet_msg', `Importing ${mozCount} .moz files from folder…`, true);
+            try {
+                const res = await fetch('/api/bin_manager/import_cabinet_library_moz', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok || data.error) {
+                    setMsg('cabinet_msg', data.error || 'Import failed.', false);
+                    return;
+                }
+                if (data.success) {
+                    const ct = data.cabinet_types ?? 0;
+                    const parts = data.parts_imported ?? 0;
+                    const files = data.files_processed ?? 0;
+                    setMsg('cabinet_msg', `Imported ${ct} cabinet types, ${parts} parts from ${files} .moz files.`, true);
+                    await loadCabinetLibraryAdmin(); // Refresh editor
+                } else {
+                    setMsg('cabinet_msg', data.error || 'Import failed.', false);
+                }
+            } catch (e) {
+                setMsg('cabinet_msg', 'Import error: ' + (e?.message || e), false);
+            }
+        }
+
         let cabinetLibraryAdminCache = null;
 
         async function loadCabinetLibraryAdmin() {
@@ -1114,10 +1345,23 @@
 
             const rows = [];
             const addRow = (p, isExcluded) => {
+                const category = p.part_category || 'panel';
                 rows.push(`
                     <tr>
                         <td class="mono">${escapeHtml(p.part_number || '')}</td>
-                        <td>${escapeHtml(p.part_category || '')}</td>
+                        <td>
+                            <select data-role="category" data-cab="${escapeAttr(cabinetName)}" data-part="${escapeAttr(p.part_number || '')}" style="width: 100%;">
+                                <option value="panel" ${category === 'panel' ? 'selected' : ''}>Panel</option>
+                                <option value="case" ${category === 'case' ? 'selected' : ''}>Case</option>
+                                <option value="drawer" ${category === 'drawer' ? 'selected' : ''}>Drawer</option>
+                                <option value="drawer_front" ${category === 'drawer_front' ? 'selected' : ''}>Drawer Front</option>
+                                <option value="door" ${category === 'door' ? 'selected' : ''}>Door</option>
+                                <option value="insert" ${category === 'insert' ? 'selected' : ''}>Insert</option>
+                                <option value="stretcher" ${category === 'stretcher' ? 'selected' : ''}>Stretcher</option>
+                                <option value="back" ${category === 'back' ? 'selected' : ''}>Back</option>
+                                <option value="custom" ${category === 'custom' ? 'selected' : ''}>Custom</option>
+                            </select>
+                        </td>
                         <td><input type="number" min="1" value="${escapeAttr(p.required_quantity ?? 1)}" data-role="qty" data-cab="${escapeAttr(cabinetName)}" data-part="${escapeAttr(p.part_number || '')}"></td>
                         <td style="text-align:center;"><input type="checkbox" data-role="excluded" data-cab="${escapeAttr(cabinetName)}" data-part="${escapeAttr(p.part_number || '')}" ${isExcluded ? 'checked' : ''}></td>
                         <td>
@@ -1144,14 +1388,16 @@
             const row = btn.closest('tr');
             const qty = row?.querySelector('input[data-role="qty"]');
             const excluded = row?.querySelector('input[data-role="excluded"]');
+            const category = row?.querySelector('select[data-role="category"]');
             const required_quantity = parseInt(qty?.value || '1', 10) || 1;
             const is_case_part = !(excluded?.checked);
+            const part_category = (category?.value || 'panel').trim();
 
             setMsg('lib_edit_msg', `Saving ${cabinet_name} / ${part_number}…`, true);
             const res = await fetch('/api/bin_manager/cabinet_library/part', {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({cabinet_name, part_number, required_quantity, is_case_part})
+                body: JSON.stringify({cabinet_name, part_number, required_quantity, is_case_part, part_category})
             });
             const data = await res.json();
             if (!res.ok || data.error) {
@@ -1187,6 +1433,7 @@
             const part_number = (document.getElementById('lib_add_part').value || '').trim();
             const required_quantity = parseInt(document.getElementById('lib_add_qty').value || '1', 10) || 1;
             const excluded = document.getElementById('lib_add_excluded').value === '1';
+            const part_category = (document.getElementById('lib_add_category').value || 'panel').trim();
             const is_case_part = !excluded;
 
             if (!cabinet_name) {
@@ -1748,7 +1995,7 @@
                 const addRowName = document.getElementById('add_display_name');
 
                 const STATION_PRESETS = [
-                    { profile: 'CNC', code: 'H08', name: 'H08', sheet: 'Station_1_H08' },
+                    { profile: 'CNC', code: 'CNC', name: 'CNC Router', sheet: 'Station_CNC' },
                     { profile: 'CNC', code: 'H10', name: 'H10', sheet: 'Station_2_H10' },
                     { profile: 'Edgebander', code: 'Edge', name: 'Edge', sheet: 'Station_3_Edge' },
                     { profile: 'Dowel', code: 'Dowel', name: 'Dowel', sheet: 'Station_4_Dowel' },
@@ -1796,8 +2043,6 @@
                     }
                     updateStation(key, 'station_code', preset.code);
                     updateStation(key, 'display_name', preset.name);
-                    // Keep station_sheet internal for compatibility (not shown in UI)
-                    updateStation(key, 'station_sheet', preset.sheet);
                     loadStations();
                 };
 
@@ -1986,30 +2231,11 @@
                 return;
             }
 
-            // Keep station_sheet internal for compatibility.
-            const stationSheetForCode = (code) => {
-                const c = (code || '').toString();
-                const map = {
-                    'H08': 'Station_1_H08',
-                    'H10': 'Station_2_H10',
-                    'Edge': 'Station_3_Edge',
-                    'Dowel': 'Station_4_Dowel',
-                    'Sort': 'Station_5_Sorting',
-                    'Pull': 'Station_6_Pulling',
-                    'Assembly': 'Station_7_Assembly',
-                    'QC': 'Station_8_QC',
-                    'Shipping': 'Station_9_Shipping',
-                };
-                return map[c] || `Station_${c}`;
-            };
-
-            const station_sheet = stationSheetForCode(station_code);
-
             try {
                 const res = await fetch('/api/admin/stations', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({stations: [{device_path, station_code, display_name, station_sheet}]})
+                    body: JSON.stringify({stations: [{device_path, station_code, display_name}]})
                 });
                 const data = await res.json();
                 if (!res.ok || data.error) {
@@ -2143,7 +2369,14 @@
             const sections = [];
             cards.forEach((card, idx) => {
                 const h2 = card.querySelector('h2');
-                const title = (h2?.textContent || '').trim() || `Section ${idx + 1}`;
+                // Get title text, excluding help icons
+                let title = '';
+                if (h2) {
+                    const h2Clone = h2.cloneNode(true);
+                    try { h2Clone.querySelectorAll('.help-icon').forEach(x => x.remove()); } catch {}
+                    title = (h2Clone.textContent || '').trim();
+                }
+                title = title || `Section ${idx + 1}`;
                 const id = _slug(title) || `section_${idx + 1}`;
                 card.classList.add('admin_section');
                 card.setAttribute('data-admin-id', id);
@@ -2237,7 +2470,10 @@
                 if (!h2) return;
                 if (card.querySelector('.card_header')) return;
 
-                const title = (h2.textContent || '').trim() || 'section';
+                // Get title text, excluding help icons
+                const h2Clone = h2.cloneNode(true);
+                try { h2Clone.querySelectorAll('.help-icon').forEach(x => x.remove()); } catch {}
+                const title = (h2Clone.textContent || '').trim() || 'section';
                 const key = `innosaw_admin_card_${_slug(title)}`;
 
                 const header = document.createElement('div');
@@ -2293,6 +2529,7 @@
                     document.getElementById('admin_bin_rows').value = cfg.rows || 4;
                     document.getElementById('admin_bin_mode').value = cfg.mode || 'standard';
                     document.getElementById('admin_bin_num_size').value = cfg.num_size || 15;
+                    document.getElementById('admin_bin_num_color').value = cfg.num_color || '#e5e7eb';
                     document.getElementById('admin_bin_content_size').value = cfg.content_size || 16;
                     document.getElementById('admin_bin_status_size').value = cfg.status_size || 11;
                     document.getElementById('admin_bin_color_ready').value = cfg.color_ready || '#059669';
@@ -2320,6 +2557,7 @@
                     rows: parseInt(document.getElementById('admin_bin_rows').value) || 4,
                     mode: document.getElementById('admin_bin_mode').value || 'standard',
                     num_size: parseInt(document.getElementById('admin_bin_num_size').value) || 15,
+                    num_color: document.getElementById('admin_bin_num_color').value,
                     content_size: parseInt(document.getElementById('admin_bin_content_size').value) || 16,
                     status_size: parseInt(document.getElementById('admin_bin_status_size').value) || 11,
                     color_ready: document.getElementById('admin_bin_color_ready').value,
@@ -2342,16 +2580,306 @@
             }
         }
 
-        (function init() {
-            fixExternalLinks();
-            initAdminSidebarLayout();
-            try { document.documentElement.classList.remove('admin_nav_boot'); } catch (e) {}
-            loadOperators();
-            loadStations();
-            refreshBackups();
-            loadOperatorBarcodes();
-            binConfigLoad();
-        })();
+        // -----------------------------
+        // Bin Card Designer
+        // -----------------------------
+        let binCardFields = [];
+        const BIN_CARD_VARIABLES = {
+            'job_name': { label: 'Job Name', defaultSize: '18px', defaultFormat: 'text' },
+            'cabinet_name': { label: 'Cabinet Name', defaultSize: '16px', defaultFormat: 'text' },
+            'cabinet_number': { label: 'Cabinet Number', defaultSize: '16px', defaultFormat: 'text' },
+            'cabinet_assembly': { label: 'Cabinet Assembly (R1C203)', defaultSize: '16px', defaultFormat: 'text' },
+            'part_name': { label: 'Part Name', defaultSize: '11px', defaultFormat: 'text' },
+            'part_number': { label: 'Part Number', defaultSize: '11px', defaultFormat: 'text' },
+            'room_name': { label: 'Room Name', defaultSize: '14px', defaultFormat: 'text' },
+            'room_number': { label: 'Room Number', defaultSize: '14px', defaultFormat: 'text' }
+        };
+
+        async function binCardDesignerLoad() {
+            const msg = document.getElementById('bin_card_designer_msg');
+            try {
+                // Prefer v1 layout endpoint; fallback to v2 shop settings if available.
+                let design = null;
+                try {
+                    const r1 = await fetch('/api/admin/kiosk_layout?t=' + Date.now());
+                    if (r1.ok) {
+                        const d1 = await r1.json().catch(() => ({}));
+                        const cfg1 = (d1 && d1.layout && d1.layout.bin_config) ? d1.layout.bin_config : null;
+                        if (cfg1 && cfg1.bin_card_design) design = cfg1.bin_card_design;
+                    }
+                } catch {}
+                if (!design) {
+                    try {
+                        const r2 = await fetch('/api/admin/shop_settings?t=' + Date.now());
+                        if (r2.ok) {
+                            const d2 = await r2.json().catch(() => ({}));
+                            const cfg2 = (d2 && d2.kiosk_layout && d2.kiosk_layout.bin_config) ? d2.kiosk_layout.bin_config : null;
+                            if (cfg2 && cfg2.bin_card_design) design = cfg2.bin_card_design;
+                        }
+                    } catch {}
+                }
+                if (!design) {
+                    const res = await fetch('/api/shop_settings?t=' + Date.now());
+                    const data = await res.json().catch(() => ({}));
+                    if (data.kiosk_layout && data.kiosk_layout.bin_config && data.kiosk_layout.bin_config.bin_card_design) {
+                        design = data.kiosk_layout.bin_config.bin_card_design;
+                    }
+                }
+
+                if (design) {
+                    if (design.fields && Array.isArray(design.fields)) {
+                        binCardFields = design.fields.map(f => ({ ...f, color: f.color || '#000000' }));
+                    } else {
+                        // Migrate old format to new format
+                        binCardFields = [];
+                        if (design.show_job !== false) {
+                            binCardFields.push({ variable: 'job_name', size: design.job_font_size || '18px', format: 'text', color: design.job_color || '#000000', enabled: true });
+                        }
+                        if (design.show_cabinet_number !== false) {
+                            binCardFields.push({ variable: 'cabinet_number', size: design.cabinet_font_size || '16px', format: 'text', color: design.cabinet_color || '#000000', enabled: true });
+                        } else if (design.show_cabinet_name === true) {
+                            binCardFields.push({ variable: 'cabinet_name', size: design.cabinet_font_size || '16px', format: 'text', color: design.cabinet_color || '#000000', enabled: true });
+                        }
+                        if (design.show_part_names !== false) {
+                            binCardFields.push({ variable: 'part_name', size: design.part_names_font_size || '11px', format: 'text', color: design.part_color || '#000000', enabled: true });
+                        }
+                    }
+                } else {
+                    // Default configuration
+                    binCardFields = [
+                        { variable: 'job_name', size: '18px', format: 'text', color: '#000000', enabled: true },
+                        { variable: 'cabinet_number', size: '16px', format: 'text', color: '#000000', enabled: true },
+                        { variable: 'part_name', size: '11px', format: 'text', color: '#000000', enabled: true }
+                    ];
+                }
+                binCardDesignerRender();
+            } catch (e) {
+                console.error('Failed to load bin card design:', e);
+                if (msg) {
+                    msg.textContent = 'Failed to load: ' + e.message;
+                    msg.className = 'msg err';
+                }
+            }
+        }
+
+        function binCardDesignerRender() {
+            const list = document.getElementById('bin_card_fields_list');
+            if (!list) return;
+            
+            if (binCardFields.length === 0) {
+                list.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">No fields added yet. Click a variable above to add it.</div>';
+                return;
+            }
+            
+            list.innerHTML = binCardFields.map((field, index) => {
+                const varInfo = BIN_CARD_VARIABLES[field.variable] || { label: field.variable, defaultSize: '14px', defaultFormat: 'text' };
+                return `
+                    <div class="bin-card-field-item" data-index="${index}" draggable="true" 
+                         style="background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin-bottom: 8px; 
+                                display: flex; align-items: center; gap: 12px; cursor: move;"
+                         ondragstart="binCardDesignerDragStart(event, ${index})"
+                         ondragover="binCardDesignerDragOver(event)"
+                         ondrop="binCardDesignerDrop(event, ${index})"
+                         ondragend="binCardDesignerDragEnd(event)">
+                        <span style="color: #666; font-size: 18px;">☰</span>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; margin-bottom: 4px;">${varInfo.label}</div>
+                            <div style="display: flex; gap: 10px; align-items: center; font-size: 12px;">
+                                <label>Size: <input type="text" value="${field.size || varInfo.defaultSize}" 
+                                    onchange="binCardFields[${index}].size = this.value" 
+                                    style="width: 70px; padding: 4px; border: 1px solid #ddd; border-radius: 4px;"></label>
+                                <label>Format: 
+                                    <select onchange="binCardFields[${index}].format = this.value" 
+                                            style="padding: 4px; border: 1px solid #ddd; border-radius: 4px;">
+                                        <option value="text" ${field.format === 'text' ? 'selected' : ''}>Text</option>
+                                        <option value="bold" ${field.format === 'bold' ? 'selected' : ''}>Bold</option>
+                                        <option value="italic" ${field.format === 'italic' ? 'selected' : ''}>Italic</option>
+                                        <option value="uppercase" ${field.format === 'uppercase' ? 'selected' : ''}>UPPERCASE</option>
+                                        <option value="lowercase" ${field.format === 'lowercase' ? 'selected' : ''}>lowercase</option>
+                                    </select>
+                                </label>
+                                <label>Color: <input type="color" value="${field.color || '#000000'}"
+                                    onchange="binCardFields[${index}].color = this.value"
+                                    style="width: 60px; height: 28px; padding: 2px; border: 1px solid #ddd; border-radius: 4px;"></label>
+                                <label><input type="checkbox" ${field.enabled !== false ? 'checked' : ''} 
+                                    onchange="binCardFields[${index}].enabled = this.checked"> Enabled</label>
+                            </div>
+                        </div>
+                        <button class="btn btn-danger" style="font-size: 11px; padding: 4px 8px;" 
+                                onclick="binCardDesignerRemove(${index})">Remove</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function binCardDesignerAddVariable(variable) {
+            if (binCardFields.find(f => f.variable === variable)) {
+                alert('This variable is already added');
+                return;
+            }
+            const varInfo = BIN_CARD_VARIABLES[variable];
+            binCardFields.push({
+                variable: variable,
+                size: varInfo.defaultSize,
+                format: varInfo.defaultFormat,
+                color: '#000000',
+                enabled: true
+            });
+            binCardDesignerRender();
+        }
+
+        function binCardDesignerRemove(index) {
+            binCardFields.splice(index, 1);
+            binCardDesignerRender();
+        }
+
+        let binCardDragIndex = null;
+        function binCardDesignerDragStart(event, index) {
+            binCardDragIndex = index;
+            event.dataTransfer.effectAllowed = 'move';
+            event.currentTarget.style.opacity = '0.5';
+        }
+
+        function binCardDesignerDragOver(event) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+        }
+
+        function binCardDesignerDrop(event, dropIndex) {
+            event.preventDefault();
+            if (binCardDragIndex === null || binCardDragIndex === dropIndex) return;
+            const item = binCardFields.splice(binCardDragIndex, 1)[0];
+            binCardFields.splice(dropIndex, 0, item);
+            binCardDesignerRender();
+        }
+
+        function binCardDesignerDragEnd(event) {
+            event.currentTarget.style.opacity = '1';
+            binCardDragIndex = null;
+        }
+
+        function binCardDesignerReset() {
+            if (confirm('Reset to default configuration?')) {
+                binCardFields = [
+                    { variable: 'job_name', size: '18px', format: 'text', enabled: true },
+                    { variable: 'cabinet_number', size: '16px', format: 'text', enabled: true },
+                    { variable: 'part_name', size: '11px', format: 'text', enabled: true }
+                ];
+                binCardDesignerRender();
+            }
+        }
+
+        async function binCardDesignerSave() {
+            const msg = document.getElementById('bin_card_designer_msg');
+            if (msg) msg.textContent = 'Saving…';
+            try {
+                // Ensure colors persist
+                const fieldsToSave = binCardFields.map(f => ({ ...f, color: f.color || '#000000' })).filter(f => f.enabled !== false);
+
+                // Try v2 save first; fallback to v1 kiosk_layout save.
+                async function _postJson(url, bodyObj) {
+                    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bodyObj) });
+                    const txt = await r.text().catch(() => '');
+                    let obj = null;
+                    try { obj = JSON.parse(txt); } catch {}
+                    return { ok: r.ok, statusText: r.statusText, obj, txt };
+                }
+
+                // v2-style save
+                let r = await _postJson('/api/admin/shop_settings/kiosk_layout', { kiosk_layout: { bin_config: { bin_card_design: { fields: fieldsToSave } } } });
+                if (!r.ok) {
+                    // v1-style save (merge into existing layout to avoid clobber)
+                    const cur = await fetch('/api/admin/kiosk_layout?t=' + Date.now()).then(x => x.json()).catch(() => ({}));
+                    const layout = cur.layout || { version: 1 };
+                    layout.bin_config = layout.bin_config || {};
+                    layout.bin_config.bin_card_design = { fields: fieldsToSave };
+                    r = await _postJson('/api/admin/kiosk_layout', { layout });
+                }
+                
+                if (r.ok) {
+                    if (msg) {
+                        msg.textContent = 'Saved successfully';
+                        msg.className = 'msg ok';
+                        setTimeout(() => { if (msg) msg.textContent = ''; }, 3000);
+                    }
+                } else {
+                    const err = (r.obj && r.obj.error) ? r.obj.error : (r.txt || r.statusText || 'Unknown error');
+                    throw new Error(err);
+                }
+            } catch (e) {
+                console.error('Failed to save bin card design:', e);
+                if (msg) {
+                    msg.textContent = 'Failed to save: ' + e.message;
+                    msg.className = 'msg err';
+                }
+            }
+        }
+
+        // -----------------------------
+        // Reports Dashboard (Station metric swap)
+        // -----------------------------
+        async function reportsConfigLoad() {
+            const msg = document.getElementById('reports_cfg_msg');
+            try {
+                const res = await fetch('/api/shop_settings?t=' + Date.now());
+                const data = await res.json().catch(() => ({}));
+                const kioskLayout = (data && data.kiosk_layout) ? data.kiosk_layout : {};
+                const rc = (kioskLayout && kioskLayout.reports_config) ? kioskLayout.reports_config : {};
+                const sec = (rc && rc.station_secondary_metric) ? rc.station_secondary_metric : {};
+
+                const cnc = sec.cnc || {};
+                const asm = sec.assembly || {};
+                const def = sec.default || {};
+
+                document.getElementById('reports_metric_default_source').value = def.source || 'gap_avg_seconds';
+                document.getElementById('reports_metric_default_label').value = def.label || 'Avg Gap';
+                document.getElementById('reports_metric_cnc_source').value = cnc.source || 'sheet_avg_seconds';
+                document.getElementById('reports_metric_cnc_label').value = cnc.label || 'Avg Sheet';
+                document.getElementById('reports_metric_assembly_source').value = asm.source || 'assembly_avg_seconds';
+                document.getElementById('reports_metric_assembly_label').value = asm.label || 'Avg Assembly';
+
+                if (msg) { msg.textContent = ''; msg.className = 'msg'; }
+            } catch (e) {
+                if (msg) { msg.textContent = 'Failed to load reports config'; msg.className = 'msg err'; }
+            }
+        }
+
+        async function reportsConfigSave() {
+            const msg = document.getElementById('reports_cfg_msg');
+            if (msg) { msg.textContent = 'Saving…'; msg.className = 'msg'; }
+            try {
+                const res = await fetch('/api/shop_settings?t=' + Date.now());
+                const data = await res.json().catch(() => ({}));
+                const kioskLayout = (data && data.kiosk_layout) ? data.kiosk_layout : {};
+                if (!kioskLayout || typeof kioskLayout !== 'object') throw new Error('Invalid kiosk_layout');
+                if (!kioskLayout.reports_config || typeof kioskLayout.reports_config !== 'object') kioskLayout.reports_config = {};
+                kioskLayout.reports_config.station_secondary_metric = {
+                    default: {
+                        source: document.getElementById('reports_metric_default_source').value,
+                        label: (document.getElementById('reports_metric_default_label').value || '').trim() || 'Avg Gap',
+                    },
+                    cnc: {
+                        source: document.getElementById('reports_metric_cnc_source').value,
+                        label: (document.getElementById('reports_metric_cnc_label').value || '').trim() || 'Avg Sheet',
+                    },
+                    assembly: {
+                        source: document.getElementById('reports_metric_assembly_source').value,
+                        label: (document.getElementById('reports_metric_assembly_label').value || '').trim() || 'Avg Assembly',
+                    },
+                };
+
+                const saveRes = await fetch('/api/admin/shop_settings/kiosk_layout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ kiosk_layout: kioskLayout })
+                });
+                const saveData = await saveRes.json().catch(() => ({}));
+                if (!saveRes.ok || saveData.error) throw new Error(saveData.error || saveRes.statusText);
+                if (msg) { msg.textContent = 'Saved.'; msg.className = 'msg ok'; setTimeout(() => { if (msg) msg.textContent = ''; }, 2500); }
+            } catch (e) {
+                if (msg) { msg.textContent = `Save failed: ${e.message || 'Error'}`; msg.className = 'msg err'; }
+            }
+        }
 
         // -----------------------------
         // Barcode mapping (scan_defaults.csv_fallback)
@@ -2451,8 +2979,8 @@
             }
 
             let parts = raw.split(delim).map(s => (s || '').toString().trim());
-            // Drop leading station prefix if present (H08, H10, Edge, etc)
-            const prefixes = new Set(['H08','H10','QC','Edge','Dowel','Sort','Pull','Assembly','Wrap','Ship']);
+            // Drop leading station prefix if present (CNC, Edge, etc)
+            const prefixes = new Set(['CNC','H08','H10','QC','Edge','Dowel','Sort','Pull','Assembly','Wrap','Ship']);
             if (parts.length >= 2 && prefixes.has((parts[0] || '').trim())) parts = parts.slice(1);
 
             const tbody = document.getElementById('scanmap_tbody');
@@ -2554,6 +3082,7 @@
             }
         }
     </script>
+    <script src="/static/contextual-help.js?v=20260118b"></script>
 </body>
 </html>
 

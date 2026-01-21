@@ -155,7 +155,7 @@ If this fails, fall back to Option B.
 
 1. In the Cloud dashboard, create/verify:
    - the **shop**
-   - the set of **stations** (H08/H10/Edge/Dowel/Sort/Pull/QC/etc.)
+   - the set of **stations** (CNC/Edge/Dowel/Sort/Pull/QC/etc.)
 2. In Cloud Admin, generate a **Pairing Code** (often labeled “Pair a Pi”).
 
 ### B) Then the Pi

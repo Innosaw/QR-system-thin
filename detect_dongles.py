@@ -146,22 +146,16 @@ def main():
     print("Add this to your config.json:\n")
     print('"scanners": {')
     
-    station_codes = ["QC", "H08", "H10", "Edge", "Dowel", "Sort", "Pull"]
-    station_sheets = [
-        "Station_8_QC", "Station_1_H08", "Station_2_H10",
-        "Station_3_Edge", "Station_4_Dowel", "Station_5_Sorting", "Station_6_Pulling"
-    ]
+    station_codes = ["QC", "CNC", "Edge", "Dowel", "Sort", "Pull"]
     
     for i, scanner in enumerate(scanners[:7]):  # Limit to 7 scanners
         station_code = station_codes[i] if i < len(station_codes) else f"Station{i+1}"
-        station_sheet = station_sheets[i] if i < len(station_sheets) else f"Station_{i+1}"
         
         # Use preferred stable path if available, otherwise use event path
         config_path = scanner['stable_path'] if scanner['stable_path'] != scanner['path'] else scanner['path']
         
         print(f'  "{config_path}": {{')
-        print(f'    "station_code": "{station_code}",')
-        print(f'    "station_sheet": "{station_sheet}"')
+        print(f'    "station_code": "{station_code}"')
         print('  }' + (',' if i < len(scanners) - 1 else ''))
     
     print('}')

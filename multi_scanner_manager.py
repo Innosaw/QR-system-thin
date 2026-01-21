@@ -169,8 +169,7 @@ class MultiScannerManager:
             for device_path in common:
                 old = old_configs.get(device_path, {}) or {}
                 new = new_configs.get(device_path, {}) or {}
-                if (old.get('station_code') != new.get('station_code')
-                        or old.get('station_sheet') != new.get('station_sheet')):
+                if (old.get('station_code') != new.get('station_code')):
                     new_code = new.get('station_code')
                     logging.info(
                         f"🔁 Scanner mapping changed: {device_path} {old.get('station_code')} → {new_code}"
@@ -179,15 +178,13 @@ class MultiScannerManager:
                     self.scanner_configs[device_path] = new
                     self.restart_scanner(
                         device_path,
-                        station_code=new.get('station_code'),
-                        station_sheet=new.get('station_sheet')
+                        station_code=new.get('station_code')
                     )
 
             self.scanner_configs = new_configs
 
     def _create_scanner(self, device_path: str, station_config: dict):
         station_code = station_config.get('station_code')
-        station_sheet = station_config.get('station_sheet')
         station_display_name = station_config.get('display_name')
         if not station_code:
             raise ValueError(f"No station_code for {device_path}")
@@ -195,7 +192,6 @@ class MultiScannerManager:
             config_file=str(self.config_file),
             device_path=device_path,
             station_code=station_code,
-            station_sheet=station_sheet,
             station_display_name=station_display_name
         )
     
@@ -290,7 +286,7 @@ class MultiScannerManager:
             }
         return status
     
-    def restart_scanner(self, device_path, station_code=None, station_sheet=None):
+    def restart_scanner(self, device_path, station_code=None):
         """Restart a single scanner without affecting others"""
         if device_path not in self.scanners:
             return False, f"Scanner not found: {device_path}"
@@ -317,14 +313,12 @@ class MultiScannerManager:
             
             # Get station config
             station_config = (self.scanner_configs or {}).get(device_path, {}) or {}
-            effective_station_sheet = station_sheet or station_config.get('station_sheet')
             
             # Create new scanner instance
             new_scanner = QRScannerForStation(
                 config_file=str(self.config_file),
                 device_path=device_path,
-                station_code=effective_station_code,
-                station_sheet=effective_station_sheet
+                station_code=effective_station_code
             )
             
             self.scanners[device_path] = new_scanner
@@ -349,7 +343,7 @@ class QRScannerForStation(QRScanner):
     """QR Scanner configured for a specific station and device
     
     Supports Sort/Pull routing: when a scan contains "Sort" or "Pull" prefix,
-    it routes to the appropriate station sheet AND updates bin contents.
+    it routes to bin manager updates accordingly.
     """
     
     # Pattern to detect Sort/Pull routing in scan data
@@ -366,14 +360,14 @@ class QRScannerForStation(QRScanner):
     )
     
     def __init__(self, config_file='config.json', device_path=None, 
-                 station_code=None, station_sheet=None, station_display_name=None):
+                 station_code=None, station_display_name=None):
         # Load base config
         self.config = QRScannerConfig(config_file)
         
         # Override station code if provided
         if station_code:
             self.config.config['station_code'] = station_code
-            self.config.config['station_id'] = station_sheet or f"Station_{station_code}"
+            self.config.config['station_id'] = station_code
         
         # Initialize with overridden config
         self.parser = QRDataParser(station_code or self.config.get('station_code'))

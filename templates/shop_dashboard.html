@@ -156,21 +156,20 @@
         <div class="subtitle">Real-time production monitoring and station status</div>
         <div class="nav_primary">
             <a class="nav_btn active" href="/">Dashboard</a>
-            <a class="nav_btn ext-link" data-port="5000" data-path="/" href="/bins">Bins</a>
-            <a id="shop_link" class="nav_btn" href="/">Shop</a>
+            <a class="nav_btn" href="/reports">Reports</a>
+            <a id="shop_link" class="nav_btn" href="/">Office</a>
+            <a class="nav_btn" href="/labels">Labels</a>
             <a class="nav_btn" href="/admin">Admin</a>
             <a class="nav_btn" href="/help">Help</a>
-            <a class="nav_btn" href="https://v2.innosaw.work/" target="_blank" rel="noopener noreferrer">License this software</a>
+            <a class="nav_btn ext-link" data-port="5000" data-path="/" href="/bins">Bins</a>
             <span class="nav_spacer"></span>
             <button id="auth_btn" class="nav_btn" type="button" onclick="innosawAuthClick()">Login</button>
         </div>
     </div>
     <div class="nav_secondary" style="margin: 0 20px 0 20px;">
-        <a class="nav_btn" href="/reports">Reports</a>
         <a class="nav_btn" href="/mobile">Mobile Scan</a>
         <a class="nav_btn" href="/maintenance">Maintenance</a>
         <a class="nav_btn" href="/inventory">Inventory</a>
-        <a class="nav_btn" href="/scans">Scan Log</a>
         <a class="nav_btn" href="/tools">Tools</a>
         <a class="nav_btn" href="/recuts">Recuts</a>
     </div>
@@ -336,7 +335,7 @@
                     } else {
                         const profileForStation = (stationCode) => {
                             const s = (stationCode || '').toString().toUpperCase();
-                            if (s === 'H08' || s === 'H10') return 'CNC';
+                            if (s === 'H08' || s === 'H10' || s === 'CNC') return 'CNC';
                             if (s === 'EDGE') return 'Edgebander';
                             if (s === 'DOWEL') return 'Dowel';
                             if (s === 'ASSEMBLY') return 'Assembly';

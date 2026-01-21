@@ -150,12 +150,82 @@
             </div>
             <div class="msg" id="clear_msg"></div>
         </div>
+
+        <div class="card">
+            <h2>🌐 Network Settings</h2>
+            <div class="small">Switch between Ethernet (cable) and WiFi. Connect this Pi to your shop's network.</div>
+
+            <!-- Current Status -->
+            <div style="margin-top:12px; padding:12px; background:#f8f9fa; border-radius:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <strong>Current Connection:</strong>
+                        <span id="net_status_type" class="pill" style="margin-left:8px;">Loading…</span>
+                    </div>
+                    <button class="btn btn-secondary" onclick="refreshNetworkStatus()" style="padding:6px 12px;">↻ Refresh</button>
+                </div>
+                <div id="net_status_details" class="small" style="margin-top:8px;"></div>
+            </div>
+
+            <!-- WiFi Section -->
+            <div style="margin-top:16px; border-top:1px solid #eee; padding-top:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <strong>📶 WiFi Networks</strong>
+                    <div class="row" style="gap:8px;">
+                        <button class="btn btn-primary" onclick="scanWifi()" style="padding:6px 12px;">Scan</button>
+                        <button class="btn btn-secondary" onclick="disconnectWifi()" style="padding:6px 12px;">Disconnect WiFi</button>
+                    </div>
+                </div>
+                <div class="msg" id="wifi_msg"></div>
+                <div id="wifi_networks" style="margin-top:10px; max-height:300px; overflow-y:auto; border:1px solid #eee; border-radius:6px;">
+                    <div style="padding:12px; color:#666; text-align:center;">Click "Scan" to find available WiFi networks</div>
+                </div>
+            </div>
+
+            <!-- Connect to WiFi Form -->
+            <div id="wifi_connect_form" style="display:none; margin-top:16px; padding:12px; background:#f0f9ff; border-radius:8px; border:1px solid #bae6fd;">
+                <div style="font-weight:600; margin-bottom:8px;">Connect to: <span id="wifi_connect_ssid"></span></div>
+                <div class="row" style="gap:10px; align-items:end;">
+                    <div class="field" style="flex:1; min-width:200px; margin-bottom:0;">
+                        <label>Password</label>
+                        <input type="password" id="wifi_password" placeholder="Enter WiFi password" />
+                    </div>
+                    <button class="btn btn-primary" onclick="connectToWifi()">Connect</button>
+                    <button class="btn btn-secondary" onclick="cancelWifiConnect()">Cancel</button>
+                </div>
+                <div class="small" style="margin-top:6px;">Leave blank for open networks (no password).</div>
+            </div>
+
+            <!-- Saved Networks -->
+            <div style="margin-top:16px; border-top:1px solid #eee; padding-top:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <strong>💾 Saved Connections</strong>
+                    <button class="btn btn-secondary" onclick="loadSavedNetworks()" style="padding:6px 12px;">Refresh</button>
+                </div>
+                <div id="saved_networks" style="margin-top:10px;">
+                    <div class="small" style="color:#666;">Loading saved connections...</div>
+                </div>
+            </div>
+
+            <!-- Tips -->
+            <div class="small" style="margin-top:16px; padding:10px; background:#fffbeb; border-radius:6px; border:1px solid #fde68a;">
+                <strong>💡 Tips:</strong>
+                <ul style="margin:6px 0 0 16px; padding:0;">
+                    <li>Connect via <strong>Ethernet cable first</strong> to configure WiFi settings</li>
+                    <li>After WiFi connects, you can unplug the Ethernet cable</li>
+                    <li>The Pi will auto-reconnect to saved WiFi networks on reboot</li>
+                    <li>If you lose connection, plug in Ethernet again to reconfigure</li>
+                </ul>
+            </div>
+        </div>
     </div>
 
     <script>
         let donglesCache = [];
         let mappingsCache = [];
         let selectedDevicePath = '';
+        let selectedWifiSSID = '';
+
         function setMsg(id, text, ok) {
             const el = document.getElementById(id);
             if (!el) return;
@@ -318,13 +388,13 @@
                 stations.forEach(s => {
                     if ((s.device_path || '') === dp) {
                         found = true;
-                        next.push({ device_path: dp, station_code: sc, display_name: dn || sc, station_sheet: s.station_sheet || '' });
+                        next.push({ device_path: dp, station_code: sc, display_name: dn || sc });
                     } else {
-                        next.push({ device_path: s.device_path, station_code: s.station_code, display_name: s.display_name, station_sheet: s.station_sheet || '' });
+                        next.push({ device_path: s.device_path, station_code: s.station_code, display_name: s.display_name });
                     }
                 });
                 if (!found) {
-                    next.push({ device_path: dp, station_code: sc, display_name: dn || sc, station_sheet: '' });
+                    next.push({ device_path: dp, station_code: sc, display_name: dn || sc });
                 }
                 const res = await fetch('/api/admin/stations', {
                     method: 'POST',
@@ -476,9 +546,249 @@
             document.getElementById('device_preview').textContent = v || '(none)';
         });
 
+        // ============= NETWORK SETTINGS FUNCTIONS =============
+
+        async function refreshNetworkStatus() {
+            const typeEl = document.getElementById('net_status_type');
+            const detailsEl = document.getElementById('net_status_details');
+            typeEl.textContent = 'Checking…';
+            typeEl.style.background = '#e0e7ff';
+            detailsEl.innerHTML = '';
+
+            try {
+                const res = await fetch('/api/thin/network/status');
+                const data = await res.json();
+
+                if (!res.ok || data.error) {
+                    typeEl.textContent = 'Error';
+                    typeEl.style.background = '#fee2e2';
+                    detailsEl.textContent = data.error || 'Failed to get status';
+                    return;
+                }
+
+                // Update connection type badge
+                const connType = data.connection_type || 'unknown';
+                if (connType === 'ethernet') {
+                    typeEl.textContent = '🔌 Ethernet';
+                    typeEl.style.background = '#d1fae5';
+                } else if (connType === 'wifi') {
+                    typeEl.textContent = '📶 WiFi' + (data.wifi_ssid ? `: ${data.wifi_ssid}` : '');
+                    typeEl.style.background = '#dbeafe';
+                } else if (connType === 'disconnected') {
+                    typeEl.textContent = '❌ Disconnected';
+                    typeEl.style.background = '#fee2e2';
+                } else {
+                    typeEl.textContent = connType;
+                    typeEl.style.background = '#f3f4f6';
+                }
+
+                // Show IP addresses
+                let details = [];
+                if (data.hostname) details.push(`Hostname: <strong>${data.hostname}</strong>`);
+                if (data.ip_addresses && data.ip_addresses.length) {
+                    const ips = data.ip_addresses.map(i => `${i.device}: <span class="mono">${i.ip}</span>`).join(', ');
+                    details.push(`IP: ${ips}`);
+                }
+                if (data.ethernet_connected && data.wifi_connected) {
+                    details.push('<span style="color:#059669;">Both Ethernet and WiFi connected</span>');
+                }
+                detailsEl.innerHTML = details.join(' &nbsp;|&nbsp; ');
+
+            } catch (e) {
+                typeEl.textContent = 'Error';
+                typeEl.style.background = '#fee2e2';
+                detailsEl.textContent = e.message;
+            }
+        }
+
+        async function scanWifi() {
+            setMsg('wifi_msg', 'Scanning for networks (this takes a few seconds)…', true);
+            const container = document.getElementById('wifi_networks');
+            container.innerHTML = '<div style="padding:12px; color:#666; text-align:center;">Scanning…</div>';
+
+            try {
+                const res = await fetch('/api/thin/network/wifi/scan');
+                const data = await res.json();
+
+                if (!res.ok || data.error) {
+                    setMsg('wifi_msg', data.error || 'Failed to scan', false);
+                    container.innerHTML = '<div style="padding:12px; color:#991b1b;">Scan failed. Make sure WiFi hardware is available.</div>';
+                    return;
+                }
+
+                const networks = data.networks || [];
+                if (!networks.length) {
+                    setMsg('wifi_msg', 'No networks found', false);
+                    container.innerHTML = '<div style="padding:12px; color:#666;">No WiFi networks detected. Try again.</div>';
+                    return;
+                }
+
+                setMsg('wifi_msg', `Found ${networks.length} network(s)`, true);
+                container.innerHTML = networks.map(n => {
+                    const signalBars = n.signal >= 75 ? '▂▄▆█' : n.signal >= 50 ? '▂▄▆░' : n.signal >= 25 ? '▂▄░░' : '▂░░░';
+                    const securityIcon = n.security ? '🔒' : '🔓';
+                    const connectedBadge = n.connected ? '<span class="pill" style="background:#d1fae5; color:#065f46; margin-left:8px;">Connected</span>' : '';
+                    return `
+                        <div style="padding:10px 12px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                            <div>
+                                <strong>${escapeHtml(n.ssid)}</strong> ${connectedBadge}
+                                <div class="small">${securityIcon} ${n.security || 'Open'} &nbsp; ${signalBars} ${n.signal}%</div>
+                            </div>
+                            <button class="btn btn-secondary" style="padding:6px 12px;" onclick="showWifiConnect('${escapeAttr(n.ssid)}', ${!n.security})">
+                                ${n.connected ? 'Reconnect' : 'Connect'}
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (e) {
+                setMsg('wifi_msg', e.message, false);
+                container.innerHTML = '<div style="padding:12px; color:#991b1b;">Error scanning.</div>';
+            }
+        }
+
+        function escapeHtml(str) {
+            return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function escapeAttr(str) {
+            return (str || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
+        }
+
+        function showWifiConnect(ssid, isOpen) {
+            selectedWifiSSID = ssid;
+            document.getElementById('wifi_connect_ssid').textContent = ssid;
+            document.getElementById('wifi_password').value = '';
+            document.getElementById('wifi_connect_form').style.display = 'block';
+            if (!isOpen) {
+                document.getElementById('wifi_password').focus();
+            }
+        }
+
+        function cancelWifiConnect() {
+            selectedWifiSSID = '';
+            document.getElementById('wifi_connect_form').style.display = 'none';
+        }
+
+        async function connectToWifi() {
+            if (!selectedWifiSSID) return;
+            const password = document.getElementById('wifi_password').value;
+
+            setMsg('wifi_msg', `Connecting to ${selectedWifiSSID}…`, true);
+
+            try {
+                const res = await fetch('/api/thin/network/wifi/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: selectedWifiSSID, password: password })
+                });
+                const data = await res.json();
+
+                if (!res.ok || data.error) {
+                    setMsg('wifi_msg', data.error || 'Connection failed', false);
+                    return;
+                }
+
+                setMsg('wifi_msg', data.message || 'Connected!', true);
+                cancelWifiConnect();
+                // Refresh status and networks
+                setTimeout(() => {
+                    refreshNetworkStatus();
+                    loadSavedNetworks();
+                }, 1000);
+
+            } catch (e) {
+                setMsg('wifi_msg', e.message, false);
+            }
+        }
+
+        async function disconnectWifi() {
+            if (!confirm('Disconnect from WiFi?\n\nMake sure you have Ethernet connected or you may lose access to this page.')) return;
+
+            setMsg('wifi_msg', 'Disconnecting…', true);
+            try {
+                const res = await fetch('/api/thin/network/wifi/disconnect', { method: 'POST' });
+                const data = await res.json();
+
+                if (!res.ok || data.error) {
+                    setMsg('wifi_msg', data.error || 'Disconnect failed', false);
+                    return;
+                }
+
+                setMsg('wifi_msg', 'WiFi disconnected', true);
+                refreshNetworkStatus();
+
+            } catch (e) {
+                setMsg('wifi_msg', e.message, false);
+            }
+        }
+
+        async function loadSavedNetworks() {
+            const container = document.getElementById('saved_networks');
+
+            try {
+                const res = await fetch('/api/thin/network/saved');
+                const data = await res.json();
+
+                if (!res.ok || data.error) {
+                    container.innerHTML = `<div class="small" style="color:#991b1b;">${data.error || 'Failed to load'}</div>`;
+                    return;
+                }
+
+                const conns = data.connections || [];
+                if (!conns.length) {
+                    container.innerHTML = '<div class="small" style="color:#666;">No saved connections</div>';
+                    return;
+                }
+
+                container.innerHTML = conns.map(c => {
+                    const icon = c.type === 'wifi' ? '📶' : (c.type === 'ethernet' ? '🔌' : '🔗');
+                    const activeBadge = c.active ? '<span class="pill" style="background:#d1fae5; color:#065f46; margin-left:8px;">Active</span>' : '';
+                    const forgetBtn = c.type === 'wifi' && !c.active
+                        ? `<button class="btn" style="padding:4px 8px; background:#fee2e2; color:#991b1b;" onclick="forgetNetwork('${escapeAttr(c.name)}')">Forget</button>`
+                        : '';
+                    return `
+                        <div style="padding:8px 0; border-bottom:1px solid #f3f4f6; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                            <div>${icon} <strong>${escapeHtml(c.name)}</strong> ${activeBadge}</div>
+                            ${forgetBtn}
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (e) {
+                container.innerHTML = `<div class="small" style="color:#991b1b;">${e.message}</div>`;
+            }
+        }
+
+        async function forgetNetwork(name) {
+            if (!confirm(`Forget "${name}"?\n\nThis Pi will no longer auto-connect to this network.`)) return;
+
+            try {
+                const res = await fetch('/api/thin/network/wifi/forget', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: name })
+                });
+                const data = await res.json();
+
+                if (!res.ok || data.error) {
+                    alert(data.error || 'Failed to forget network');
+                    return;
+                }
+
+                loadSavedNetworks();
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        // ============= PAGE INITIALIZATION =============
+
         loadMappings();
         // best-effort: if already paired, load station list from cloud to avoid typos
         refreshCloudStations();
+        // Load network status on page load
+        refreshNetworkStatus();
+        loadSavedNetworks();
         // Optional auto-detect on load
         // detectDongles();
     </script>

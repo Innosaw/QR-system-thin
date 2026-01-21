@@ -166,17 +166,89 @@ class QRDataParser:
     
     def __init__(self, station_code):
         self.station_code = station_code
-        self.routing = {
-            "H08": "Station_1_H08", 
-            "H10": "Station_2_H10",
-            "Edge": "Station_3_Edge", 
-            "Dowel": "Station_4_Dowel",
-            "Sort": "Station_5_Sorting", 
-            "Pull": "Station_6_Pulling",
-            "Assembly": "Station_7_Assembly", 
-            "QC": "Station_8_QC",
-            "Wrap": "Station_9_Wrapping", 
-            "Ship": "Station_10_Shipping"
+        self.rules = self._load_rules()
+        self.routing = {}
+
+    def _load_rules(self) -> dict:
+        """Load QR parsing rules from qr_rules/default_rules.json with fallback to legacy."""
+        try:
+            base_dir = Path(__file__).resolve().parent
+            rules_path = base_dir / "qr_rules" / "default_rules.json"
+            if rules_path.exists():
+                data = json.loads(rules_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and isinstance(data.get("rules"), dict):
+                    return data["rules"]
+        except Exception as e:
+            logging.debug(f"QR rules load failed; using legacy defaults: {e}")
+
+        # Fallback legacy rules (mirror of previous behavior)
+        return {
+            "H08": {
+                "required_parts": 4,
+                "pattern": r"^H08,([^,]+),([^,]+),([^,]+),?(\d+)?",
+                "fields": ["gcode", "material", "job_name", "quantity"],
+                "validation": {
+                    "gcode": r"^[A-Z0-9_-]+$",
+                    "material": r"^.{1,50}$",
+                    "job_name": r"^.{1,100}$",
+                    "quantity": r"^\d*$"
+                }
+            },
+            "H10": {
+                "required_parts": 4,
+                "pattern": r"^H10,([^,]+),([^,]+),([^,]+),?(\d+)?",
+                "fields": ["gcode", "material", "job_name", "quantity"],
+                "validation": {
+                    "gcode": r"^[A-Z0-9_-]+$", 
+                    "material": r"^.{1,50}$",
+                    "job_name": r"^.{1,100}$",
+                    "quantity": r"^\d*$"
+                }
+            },
+            "Edge": {
+                "required_parts": 3,
+                "pattern": r"^Edge,([^,]+),([^,]+),([^,]+)",
+                "fields": ["part_number", "material", "job_name"],
+                "validation": {
+                    "part_number": r"^[A-Z0-9_-]+$",
+                    "material": r"^.{1,50}$", 
+                    "job_name": r"^.{1,100}$"
+                }
+            },
+            "Dowel": {
+                "required_parts": 3,
+                "pattern": r"^Dowel,([^,]+),([^,]+),([^,]+)",
+                "fields": ["part_number", "material", "job_name"],
+                "validation": {
+                    "part_number": r"^[A-Z0-9_-]+$",
+                    "material": r"^.{1,50}$",
+                    "job_name": r"^.{1,100}$"
+                }
+            },
+            "Sort": {
+                "required_parts": 1,
+                "pattern": r"^Sort,([^,]+),?([^,]*),?([^,]*)",
+                "fields": ["bin_number", "part_number", "cabinet_assembly"],
+                "validation": {
+                    "bin_number": r"^[A-Z0-9_-]+$",
+                    "part_number": r"^[A-Z0-9_-]*$",
+                    "cabinet_assembly": r"^.*$"
+                },
+                "column_map": ["bin_number", "part_number", "cabinet_assembly"],
+                "delimiter": ","
+            },
+            "Pull": {
+                "required_parts": 1,
+                "pattern": r"^Pull,([^,]+),?([^,]*),?([^,]*)",
+                "fields": ["bin_number", "part_number", "cabinet_assembly"],
+                "validation": {
+                    "bin_number": r"^[A-Z0-9_-]+$",
+                    "part_number": r"^[A-Z0-9_-]*$",
+                    "cabinet_assembly": r"^.*$"
+                },
+                "column_map": ["bin_number", "part_number", "cabinet_assembly"],
+                "delimiter": ","
+            }
         }
 
     @staticmethod
@@ -223,7 +295,6 @@ class QRDataParser:
             parsed_data = {
                 "timestamp": timestamp,
                 "station_code": station,  # Use configured station, not from scan
-                "station_sheet": self.routing.get(station),
                 "operator": operator,
                 "raw_data": scan_text,  # Keep original for logging
                 "parts": parts,  # Data parts (station prefix already removed if present)
@@ -240,72 +311,73 @@ class QRDataParser:
             except Exception:
                 pass
             
-            # Station-specific parsing (parts already have station prefix removed if present)
-            #
-            # Primary label format (new):
-            # {Gcode_Filename},{Part_Num},{Job_Name},{Cab_Name},{Cab_Assembly_Num},{Part_Name},{Part_Material},{Run_Name},{Opening_letter}
-            #
-            # Backward compatible (old):
-            # {Gcode_Filename},{Part_Num},{Job_Name},{Cab_Name},{Cab_Assembly_Num},{Part_Name},{Part_Material},{Opening_letter}
-            # or older cutting format (H08/H10): {Gcode_Filename},{Material},{Job_Name},{Qty}
-            #
+            # Station rule (data-driven)
+            rule = self.rules.get(station) if isinstance(self.rules, dict) else None
+            delimiter = None
+            column_map = None
+            validation = {}
+            if rule:
+                delimiter = rule.get("delimiter")
+                column_map = rule.get("column_map")
+                validation = rule.get("validation") if isinstance(rule.get("validation"), dict) else {}
+
+            def _validate(field_name: str, val: str):
+                pat = validation.get(field_name)
+                if pat and val and not re.match(pat, val):
+                    raise ValueError(f"Field {field_name} failed validation: {val}")
+
             def _get(i: int) -> str:
                 return parts[i] if len(parts) > i else ""
 
-            # Special-case older H08/H10 cutting scans (gcode, material, job, qty)
-            if station in ["H08", "H10"] and len(parts) == 4:
-                parsed_data["parsed_fields"] = {
-                    "gcode": _get(0),
-                    "material": _get(1),
-                    "job_name": _get(2),
-                    "quantity": _get(3),
-                }
-                return parsed_data
-
-            gcode = _get(0)
-            part_num = _get(1)
-            job_name = _get(2)
-            cab_name = _get(3)
-            cab_assembly = _get(4)
-            part_name = _get(5)
-
-            material_name = _get(6)
-            run_name = ""
-            opening_letter = ""
-            if len(parts) >= 9:
-                run_name = _get(7)
-                opening_letter = _get(8)
-            elif len(parts) == 8:
-                opening_letter = _get(7)
+            if delimiter and column_map:
+                mapped_fields = {}
+                for idx, field_name in enumerate(column_map):
+                    val = _get(idx)
+                    _validate(field_name, val)
+                    mapped_fields[field_name] = val
+                parsed_data["parsed_fields"] = mapped_fields
             else:
-                # Legacy: no material/run/opening
-                material_name = ""
+                # Legacy structured parsing (kept for backward compatibility)
+                # Primary label format (new):
+                # {Gcode_Filename},{Part_Num},{Job_Name},{Cab_Name},{Cab_Assembly_Num},{Part_Name},{Part_Material},{Run_Name},{Opening_letter}
+                #
+                # Backward compatible (old):
+                # {Gcode_Filename},{Part_Num},{Job_Name},{Cab_Name},{Cab_Assembly_Num},{Part_Name},{Part_Material},{Opening_letter}
+                # or older cutting format (H08/H10): {Gcode_Filename},{Material},{Job_Name},{Qty}
+
+                # Special-case older H08/H10 cutting scans (gcode, material, job, qty)
+                if station in ["H08", "H10"] and len(parts) == 4:
+                    parsed_data["parsed_fields"] = {
+                        "gcode": _get(0),
+                        "material": _get(1),
+                        "job_name": _get(2),
+                        "quantity": _get(3),
+                    }
+                    return parsed_data
+
+                gcode = _get(0)
+                part_num = _get(1)
+                job_name = _get(2)
+                cab_name = _get(3)
+                cab_assembly = _get(4)
+                part_name = _get(5)
+
+                material_name = _get(6)
                 run_name = ""
                 opening_letter = ""
-
-            # Stations that primarily scan part labels
-            if station in ["H08", "H10", "Edge", "Dowel", "Assembly", "QC", "Wrap", "Ship"]:
-                parsed_data["parsed_fields"] = {
-                    "gcode": gcode,
-                    "part_num": part_num,
-                    "job_name": job_name,
-                    "cabinet_name": cab_name,
-                    "cabinet_assembly": cab_assembly,
-                    "part_name": part_name,
-                    "material": material_name,
-                    "run_name": run_name,
-                    "opening_letter": opening_letter
-                }
-            elif station in ["Sort", "Pull"]:
-                # Sort/Pull stations may scan BIN labels; those are generally handled earlier,
-                # but keep robust parsing here for direct station scans.
-                if gcode.upper().startswith("BIN") and len(parts) <= 3:
-                    parsed_data["parsed_fields"] = {
-                        "bin_number": gcode,
-                        "part_number": _get(1),
-                        "cabinet_assembly": _get(2)
-                    }
+                if len(parts) >= 9:
+                    run_name = _get(7)
+                    opening_letter = _get(8)
+                elif len(parts) == 8:
+                    opening_letter = _get(7)
                 else:
+                    # Legacy: no material/run/opening
+                    material_name = ""
+                    run_name = ""
+                    opening_letter = ""
+
+                # Stations that primarily scan part labels
+                if station in ["H08", "H10", "Edge", "Dowel", "Assembly", "QC", "Wrap", "Ship"]:
                     parsed_data["parsed_fields"] = {
                         "gcode": gcode,
                         "part_num": part_num,
@@ -317,17 +389,43 @@ class QRDataParser:
                         "run_name": run_name,
                         "opening_letter": opening_letter
                     }
-            elif station == "QC":
-                # QC station accepts any format - just store all parts
-                parsed_data["parsed_fields"] = {
-                    "data": parts  # Store all parts as-is
-                }
+                elif station in ["Sort", "Pull"]:
+                    # Sort/Pull stations may scan BIN labels; those are generally handled earlier,
+                    # but keep robust parsing here for direct station scans.
+                    if gcode.upper().startswith("BIN") and len(parts) <= 3:
+                        parsed_data["parsed_fields"] = {
+                            "bin_number": gcode,
+                            "part_number": _get(1),
+                            "cabinet_assembly": _get(2)
+                        }
+                    else:
+                        parsed_data["parsed_fields"] = {
+                            "gcode": gcode,
+                            "part_num": part_num,
+                            "job_name": job_name,
+                            "cabinet_name": cab_name,
+                            "cabinet_assembly": cab_assembly,
+                            "part_name": part_name,
+                            "material": material_name,
+                            "run_name": run_name,
+                            "opening_letter": opening_letter
+                        }
+                elif station == "QC":
+                    # QC station accepts any format - just store all parts
+                    parsed_data["parsed_fields"] = {
+                        "data": parts  # Store all parts as-is
+                    }
             
             return parsed_data
             
         except Exception as e:
-            logging.error(f"Parse error for '{scan_text}': {e}")
+            # Avoid logging raw scan content; report length only
+            logging.error("Parse error for scan (len=%s): %s", len(str(scan_text) or ""), e)
             raise
+
+    def _routing_for(self, station: str) -> Optional[str]:
+        # Google Sheets routing removed; kept for compatibility if needed.
+        return None
 
 
 _SCAN_DEFAULTS_CACHE = {"ts": 0.0, "val": {}}
@@ -433,162 +531,6 @@ def _camera_deps_required():
                 "Keep input.mode='barcode_scanner' or install camera dependencies. "
                 f"(import error: {e})"
             )
-        """Process H08/H10 station with start/end time tracking"""
-        timestamp = data['timestamp']
-        fields = data['parsed_fields']
-        parts_list = data.get('parts', [])
-        
-        # Look for existing entry to update end time
-        all_values = sheet.get_all_values()
-        matched_row = None
-        
-        for i in range(len(all_values) - 1, 0, -1):  # Search from bottom
-            row = all_values[i]
-            if (len(row) > 3 and 
-                row[1] == fields['gcode'] and 
-                row[3] == fields['job_name']):
-                matched_row = i + 1  # Convert to 1-indexed
-                break
-        
-        if matched_row:
-            # Update existing row with end time
-            sheet.update_cell(matched_row, 11, timestamp.strftime('%Y-%m-%d %H:%M:%S'))
-            
-            # Calculate duration if start time exists
-            start_time_str = sheet.cell(matched_row, 10).value
-            if start_time_str:
-                try:
-                    start_time = datetime.strptime(start_time_str, '%Y-%m-%d %H:%M:%S')
-                    duration = (timestamp - start_time).total_seconds() / 60
-                    sheet.update_cell(matched_row, 12, f"{duration:.2f}")
-                except ValueError:
-                    pass
-        else:
-            # Add new row with start time
-            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-            row_data = [timestamp_str]
-            row_data.extend(parts_list)
-            row_data.append(data['operator'])
-            row_data.append(data['station_code'])
-            row_data.append(timestamp_str)  # Start time
-            row_data.append("")           # End time placeholder
-            row_data.append("")           # Duration placeholder
-            sheet.append_row(row_data)
-    
-    def _process_edge_dowel_station(self, sheet, data):
-        """Process Edge/Dowel stations with block tracking"""
-        timestamp = data['timestamp']
-        parts = data['parts']
-        
-        # Get last row for block calculation
-        all_values = sheet.get_all_values()
-        time_since = ""
-        block_id = "B1"
-        
-        if len(all_values) > 1:
-            last_row = all_values[-1]
-            if last_row and last_row[0]:
-                try:
-                    last_time = datetime.strptime(last_row[0], '%Y-%m-%d %H:%M:%S')
-                    diff_minutes = (timestamp - last_time).total_seconds() / 60
-                    time_since = f"{diff_minutes:.2f}"
-                    last_block = last_row[-1] if last_row[-1] else "B1"
-                    last_block_num = int(last_block.replace("B", "")) if last_block.startswith("B") else 1
-                    block_id = f"B{last_block_num + 1}" if diff_minutes > 30 else last_block
-                except (ValueError, IndexError):
-                    pass
-        
-        row_data = [timestamp.strftime('%Y-%m-%d %H:%M:%S')]
-        row_data.extend(parts)
-        row_data.append(data['operator'])
-        row_data.append(data['station_code'])
-        row_data.append(time_since)
-        row_data.append(block_id)
-        sheet.append_row(row_data)
-    
-    def _process_sort_pull_station(self, sheet, data):
-        """Process Sort/Pull stations with bin tracking"""
-        timestamp = data['timestamp']
-        fields = data['parsed_fields']
-        parts = data.get('parts', [])
-        
-        # Extract part data from the scan (new format):
-        # parts[0]=gcode, parts[1]=part_num, parts[2]=job_name, parts[3]=cab_name,
-        # parts[4]=cab_assembly, parts[5]=part_name, parts[6]=part_material, parts[7]=opening_letter
-        gcode = parts[0] if len(parts) > 0 else ""
-        part_num = parts[1] if len(parts) > 1 else ""
-        job_name = parts[2] if len(parts) > 2 else ""
-        cab_name = parts[3] if len(parts) > 3 else ""
-        cab_assembly = parts[4] if len(parts) > 4 else ""
-        part_name = parts[5] if len(parts) > 5 else ""
-        
-        bin_number = fields.get('bin_number', '')
-        pair_validated = fields.get('pair_validated', 'NO')
-        
-        # Always add a new row for each bin+part scan (no update logic - each scan is unique)
-        # Columns: A=Timestamp, B=Gcode, C=Part_Num, D=Job_Name, E=Cab_Name, F=Cab_Assembly, G=Part_Name, H=Operator, I=Station, J=Bin, K=Validated
-        row_data = [
-            timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            gcode,
-            part_num,
-            job_name,
-            cab_name,
-            cab_assembly,
-            part_name,
-            data['operator'],
-            data['station_code'],
-            bin_number,
-            pair_validated
-        ]
-        
-        try:
-            result = sheet.append_row(row_data)
-            logging.info(f"📊 Appended {data['station_code']} row to Google Sheets: Bin={bin_number}, Part={gcode}")
-            logging.info(f"📊 Sheet response: {result}")
-        except Exception as e:
-            logging.error(f"❌ Failed to append {data['station_code']} row to sheet: {e}")
-    
-    def _process_assembly_station(self, sheet, data):
-        """Process Assembly station with cabinet tracking"""
-        timestamp = data['timestamp']
-        parts_list = data.get('parts', [])
-        cabinet_num = parts_list[4] if len(parts_list) > 4 else ""
-        
-        # Look for existing cabinet entry
-        all_values = sheet.get_all_values()
-        found_row = None
-        
-        for i in range(len(all_values) - 1, 0, -1):
-            row = all_values[i]
-            if len(row) > 5 and row[5] == cabinet_num:
-                found_row = i + 1
-                break
-        
-        if found_row:
-            start_time_str = sheet.cell(found_row, 10).value
-            if not start_time_str:
-                # Set start time
-                sheet.update_cell(found_row, 10, timestamp.strftime('%Y-%m-%d %H:%M:%S'))
-            else:
-                # Set end time and calculate duration
-                sheet.update_cell(found_row, 11, timestamp.strftime('%Y-%m-%d %H:%M:%S'))
-                try:
-                    start_time = datetime.strptime(start_time_str, '%Y-%m-%d %H:%M:%S')
-                    duration = (timestamp - start_time).total_seconds() / 60
-                    sheet.update_cell(found_row, 12, f"{duration:.2f}")
-                except ValueError:
-                    pass
-        else:
-            # Add new assembly entry
-            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-            row_data = [timestamp_str]
-            row_data.extend(parts_list)
-            row_data.append(data['operator'])
-            row_data.append(data['station_code'])
-            row_data.append(timestamp_str)  # Start time
-            row_data.append("")
-            row_data.append("")
-            sheet.append_row(row_data)
 
 class BarcodeScannerListener:
     """Read scan strings from a USB barcode scanner (keyboard wedge)."""
@@ -1204,7 +1146,7 @@ class QRScanner:
             # If configured as a thin client, skip local routing/logic and forward raw scan to cloud.
             if self._cloud_sink and bool(self.config.get("cloud_v2.thin_mode", False)):
                 if self.duplicate_detector.is_duplicate(scan_data):
-                    logging.warning(f"Duplicate scan ignored: {scan_data}")
+                    logging.warning("Duplicate scan ignored (thin mode, len=%s)", len(str(scan_data) or ""))
                     self.hardware.beep_error()
                     return False
 
@@ -1256,14 +1198,14 @@ class QRScanner:
             has_pending_recut = (self.pending_recut and (not self._pending_recut_expired()))
             
             if not has_pending_pull and not has_pending_recut and self.duplicate_detector.is_duplicate(scan_data):
-                logging.warning(f"Duplicate scan ignored: {scan_data}")
+                logging.warning("Duplicate scan ignored (len=%s)", len(str(scan_data) or ""))
                 self.hardware.beep_error()
                 return False
             
             # Parse scan data
             parsed_data = self.parser.parse_scan_data(scan_data, self.current_operator)
             
-            # Log to database (triggers auto-consumption for H08/H10)
+            # Log to database (triggers auto-consumption for CNC)
             try:
                 from database_schema import log_scan
                 log_scan(
@@ -1282,7 +1224,7 @@ class QRScanner:
             except Exception as e:
                 logging.warning(f"Failed to log recut event: {e}")
             
-            logging.info(f"Successfully processed scan: {scan_data}")
+            logging.info("Successfully processed scan (len=%s)", len(str(scan_data) or ""))
             self.hardware.beep_success()
             self.hardware.led_on()
             
@@ -1637,11 +1579,6 @@ class QRScanner:
     
     def _submit_bin_record(self, station_code, bin_code, part_data=None):
         """Submit bin record to Google Sheets AND update bin database"""
-        station_sheet = self.parser.routing.get(station_code)
-        if not station_sheet:
-            logging.error("No station sheet mapping for %s", station_code)
-            return
-        
         timestamp = datetime.now()
         
         # Extract part info from the scanned data

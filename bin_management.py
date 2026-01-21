@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Set
 import logging
-from flask import Flask, render_template, jsonify, request, session, g
+from flask import Flask, render_template, jsonify, request, session, g, make_response
 from urllib.parse import urlparse
 from typing import Optional
 from path_utils import resolve_path
@@ -30,6 +30,11 @@ try:
     from database_schema import get_db_connection
 except Exception:
     get_db_connection = None
+
+try:
+    from database_schema import set_setting
+except Exception:
+    set_setting = None
 
 # Import case parts logic
 try:
@@ -1760,7 +1765,91 @@ except ImportError:
 @app.route('/')
 def bin_monitor_dashboard():
     """Main dashboard showing all bins and cabinet status"""
-    return render_template('bin_dashboard.html')
+    # Prevent browser/CDN caching from serving stale UI after deploys (Cloudflare).
+    resp = make_response(render_template('bin_dashboard.html'))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
+
+# Also serve the dashboard at /bins (some reverse proxies do not strip the /bins prefix)
+@app.route('/bins')
+@app.route('/bins/')
+def bin_monitor_dashboard_bins_alias():
+    return bin_monitor_dashboard()
+
+
+# -------------------------------------------------------------------
+# /bins/api/* compatibility layer
+# If a proxy forwards /bins/api/... to this app without stripping /bins,
+# the shared bin_dashboard.html will call these paths (apiBase="/bins").
+# -------------------------------------------------------------------
+
+@app.route('/bins/api/bin_contents')
+def api_bin_contents_bins_alias():
+    return api_bin_contents()
+
+
+@app.route('/bins/api/cabinet_status')
+def api_cabinet_status_bins_alias():
+    return api_cabinet_status()
+
+
+@app.route('/bins/api/case_ready_cabinets')
+def api_case_ready_cabinets_bins_alias():
+    return api_case_ready_cabinets()
+
+
+@app.route('/bins/api/bin_statistics')
+def api_bin_statistics_bins_alias():
+    return api_bin_statistics()
+
+
+@app.route('/bins/api/cabinet_library')
+def api_cabinet_library_bins_alias():
+    return api_cabinet_library()
+
+
+@app.route('/bins/api/cabinet_breakdown/<path:cabinet_name>')
+def api_cabinet_breakdown_bins_alias(cabinet_name: str):
+    return cabinet_breakdown(cabinet_name)
+
+
+@app.route('/bins/api/mozaik/cabinet_breakdown')
+def api_mozaik_cabinet_breakdown_bins_alias():
+    return mozaik_cabinet_breakdown()
+
+
+@app.route('/bins/api/bin_manual_add_part', methods=['POST'])
+def api_bin_manual_add_part_bins_alias():
+    return bin_manual_add_part()
+
+
+@app.route('/bins/api/bin_clear/<int:bin_number>', methods=['POST'])
+def api_bin_clear_bins_alias(bin_number: int):
+    return bin_clear(bin_number)
+
+
+@app.route('/bins/api/bin_clear_hold/<int:bin_number>', methods=['POST'])
+def api_bin_clear_hold_bins_alias(bin_number: int):
+    return bin_clear_hold(bin_number)
+
+
+@app.route('/bins/api/bin_remove_part', methods=['POST'])
+def api_bin_remove_part_bins_alias():
+    return bin_remove_part()
+
+
+@app.route('/bins/api/import_cabinet_library_csv', methods=['POST'])
+def api_import_cabinet_library_csv_bins_alias():
+    return import_cabinet_library_csv()
+
+
+@app.route('/bins/api/admin/kiosk_layout', methods=['GET', 'POST'])
+def api_admin_kiosk_layout_bins_alias():
+    if request.method == 'GET':
+        return api_admin_kiosk_layout_get()
+    return api_admin_kiosk_layout_post()
 
 @app.route('/api/bin_contents')
 def api_bin_contents():
@@ -1785,6 +1874,71 @@ def api_bin_statistics():
     except Exception as e:
         logging.error(f"/api/bin_statistics failed: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+# ============================================
+# Admin: kiosk layout (v1 bins UI compatibility)
+# ============================================
+
+def _load_kiosk_layout_obj() -> dict:
+    """
+    v1 bin_dashboard.html expects GET /api/admin/kiosk_layout -> { layout: { bin_config: {...} } }
+    Store as a JSON string in settings under key 'kiosk_layout_json'.
+    """
+    try:
+        if get_setting:
+            raw = get_setting("kiosk_layout_json", "")  # type: ignore[misc]
+        else:
+            raw = ""
+        if not raw:
+            return {"layout": {"bin_config": None}}
+        obj = json.loads(raw)
+        if not isinstance(obj, dict):
+            return {"layout": {"bin_config": None}}
+        # Allow either stored shape {layout:{bin_config}} or {bin_config}
+        if "layout" in obj and isinstance(obj.get("layout"), dict):
+            return {"layout": obj.get("layout")}
+        return {"layout": {"bin_config": obj.get("bin_config") if isinstance(obj.get("bin_config"), dict) else obj}}
+    except Exception:
+        return {"layout": {"bin_config": None}}
+
+
+@app.route('/api/admin/kiosk_layout', methods=['GET'])
+def api_admin_kiosk_layout_get():
+    # No auth enforcement here; v1 deployments often run on LAN only.
+    return jsonify(_load_kiosk_layout_obj())
+
+
+@app.route('/api/admin/kiosk_layout', methods=['POST'])
+def api_admin_kiosk_layout_post():
+    """
+    Accept:
+    - { layout: { bin_config: {...} } }
+    - { kiosk_layout: { bin_config: {...} } }
+    """
+    if not set_setting:
+        return jsonify({"error": "settings storage unavailable (set_setting missing)"}), 500
+
+    data = request.get_json(silent=True) or {}
+    layout = data.get("layout") if isinstance(data.get("layout"), dict) else None
+    kiosk_layout = data.get("kiosk_layout") if isinstance(data.get("kiosk_layout"), dict) else None
+    src = layout or kiosk_layout or {}
+    bin_config = src.get("bin_config") if isinstance(src.get("bin_config"), dict) else None
+    if not isinstance(bin_config, dict):
+        return jsonify({"error": "bin_config required"}), 400
+
+    # Basic sanity: must be JSON-serializable dict
+    try:
+        raw = json.dumps({"layout": {"bin_config": bin_config}}, separators=(",", ":"), ensure_ascii=False)
+    except Exception as e:
+        return jsonify({"error": f"invalid bin_config: {str(e)}"}), 400
+
+    try:
+        set_setting("kiosk_layout_json", raw)  # type: ignore[misc]
+    except Exception as e:
+        return jsonify({"error": f"failed to save: {str(e)}"}), 500
+
+    return jsonify({"success": True})
 
 @app.route('/api/ready_cabinets')
 def api_ready_cabinets():
@@ -2442,6 +2596,157 @@ def api_import_cabinet_library_csv():
     except Exception as e:
         logging.error(f"Failed to import cabinet library from CSV: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/import_cabinet_library_moz', methods=['POST'])
+def api_import_cabinet_library_moz():
+    """API endpoint to import cabinet library from Mozaik .moz files or ZIP folder"""
+    try:
+        if 'moz_files' not in request.files:
+            return jsonify({'success': False, 'error': 'No .moz files provided'}), 400
+        
+        moz_files = request.files.getlist('moz_files')
+        if not moz_files or len(moz_files) == 0:
+            return jsonify({'success': False, 'error': 'No files selected'}), 400
+        
+        # Check if we should overwrite matching cabinet names
+        overwrite_matching = request.form.get('overwrite_matching', 'false').lower() in ('true', '1', 'yes')
+        
+        # Import the parsing functions from tools
+        import sys
+        from pathlib import Path
+        tools_path = Path(__file__).parent / 'tools'
+        if str(tools_path) not in sys.path:
+            sys.path.insert(0, str(tools_path))
+        
+        from moz_to_cabinet_library import parse_moz, iter_moz_files
+        import tempfile
+        import zipfile
+        import shutil
+        
+        # Create temporary directory for uploaded files
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            moz_file_paths = []
+            
+            # Extract uploaded files (handle both .moz files and ZIP archives)
+            for file_storage in moz_files:
+                filename = file_storage.filename or ''
+                if filename.lower().endswith('.zip'):
+                    # Extract ZIP file
+                    zip_path = temp_path / filename
+                    file_storage.save(str(zip_path))
+                    with zipfile.ZipFile(zip_path, 'r') as z:
+                        z.extractall(temp_path)
+                    # Find all .moz files in extracted ZIP
+                    moz_file_paths.extend(iter_moz_files(temp_path, recursive=True))
+                elif filename.lower().endswith('.moz'):
+                    # Save .moz file directly
+                    moz_path = temp_path / filename
+                    file_storage.save(str(moz_path))
+                    moz_file_paths.append(moz_path)
+            
+            if not moz_file_paths:
+                return jsonify({'success': False, 'error': 'No .moz files found in upload'}), 400
+            
+            # Parse all .moz files
+            cabinet_parts_data = []
+            cabinet_types = set()
+            files_processed = 0
+            failures = 0
+            
+            for moz_path in moz_file_paths:
+                try:
+                    cab = parse_moz(moz_path, cabinet_key="filename")
+                    files_processed += 1
+                    
+                    # Aggregate parts by cabinet type
+                    for part_name, qty in cab.parts:
+                        cabinet_types.add(cab.cabinet_type)
+                        cabinet_parts_data.append({
+                            'cabinet_name': cab.cabinet_type,
+                            'part_number': part_name,
+                            'quantity': qty
+                        })
+                except Exception as e:
+                    failures += 1
+                    logging.warning(f"Failed to parse {moz_path.name}: {e}")
+            
+            if not cabinet_parts_data:
+                return jsonify({
+                    'success': False,
+                    'error': f'No valid cabinet data found in {files_processed} files (failures: {failures})'
+                }), 400
+            
+            # If overwrite_matching is True, delete existing cabinets with matching names before importing
+            if overwrite_matching and bin_manager.case_manager:
+                import sqlite3
+                with sqlite3.connect(bin_manager.case_manager.db_path) as conn:
+                    cursor = conn.cursor()
+                    for cab_type in cabinet_types:
+                        cursor.execute('''
+                            DELETE FROM case_parts_requirements WHERE cabinet_name = ?
+                        ''', (cab_type,))
+                    conn.commit()
+                    logging.info(f"Deleted existing data for {len(cabinet_types)} cabinet types (overwrite mode)")
+            
+            # Import using case manager
+            if bin_manager.case_manager:
+                # If overwrite_matching, we already cleared those cabinets, so merge the rest
+                # Otherwise, merge everything
+                success = bin_manager.case_manager.import_cabinet_requirements(cabinet_parts_data, clear_existing=False)
+            else:
+                # Fallback: import into cabinet_recipes table
+                import sqlite3
+                with sqlite3.connect(bin_manager.db_path) as conn:
+                    cursor = conn.cursor()
+                    # If overwrite_matching, delete existing cabinets with matching names
+                    if overwrite_matching:
+                        for cab_type in cabinet_types:
+                            cursor.execute('DELETE FROM cabinet_recipes WHERE cabinet_name = ?', (cab_type,))
+                    
+                    # Insert/update parts
+                    for part_data in cabinet_parts_data:
+                        # Check if exists, update or insert
+                        cursor.execute('''
+                            SELECT id FROM cabinet_recipes 
+                            WHERE cabinet_name = ? AND part_number = ?
+                        ''', (part_data['cabinet_name'], part_data['part_number']))
+                        existing = cursor.fetchone()
+                        if existing:
+                            cursor.execute('''
+                                UPDATE cabinet_recipes 
+                                SET required_quantity = ?
+                                WHERE id = ?
+                            ''', (part_data['quantity'], existing[0]))
+                        else:
+                            cursor.execute('''
+                                INSERT INTO cabinet_recipes (cabinet_name, part_number, required_quantity)
+                                VALUES (?, ?, ?)
+                            ''', (part_data['cabinet_name'], part_data['part_number'], part_data['quantity']))
+                    conn.commit()
+                    success = True
+            
+            if success:
+                logging.info(f"Imported {len(cabinet_parts_data)} parts from {files_processed} .moz files for {len(cabinet_types)} cabinet types")
+                return jsonify({
+                    'success': True,
+                    'message': 'Cabinet library imported successfully from .moz files',
+                    'cabinet_types': len(cabinet_types),
+                    'parts_imported': len(cabinet_parts_data),
+                    'files_processed': files_processed,
+                    'failures': failures
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to import cabinet library'
+                }), 500
+        
+    except Exception as e:
+        logging.error(f"Failed to import cabinet library from .moz files: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 def start_web_server(host=None, port=8080, debug=False):
     """Start the web server for bin monitoring"""

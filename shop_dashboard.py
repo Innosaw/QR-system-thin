@@ -2056,7 +2056,6 @@ def admin_stations_proxy():
                 stations.append({
                     'device_path': device_path,
                     'station_code': st_cfg.get('station_code'),
-                    'station_sheet': st_cfg.get('station_sheet'),
                     'display_name': st_cfg.get('display_name') or st_cfg.get('station_code'),
                 })
             return jsonify({'stations': stations}), 200
@@ -2091,7 +2090,6 @@ def admin_stations_proxy():
                     continue
                 new_scanners[dp] = {
                     'station_code': sc,
-                    'station_sheet': (row.get('station_sheet') or '').strip() or None,
                     'display_name': (row.get('display_name') or '').strip() or None,
                 }
         else:
@@ -2718,6 +2716,253 @@ def thin_cloud_stations():
         return jsonify({'error': str(e), 'stations': []}), 500
 
 
+# =============================================================================
+# NETWORK SETTINGS (for headless thin Pi units)
+# =============================================================================
+
+def _run_nmcli(args: list, timeout: int = 15) -> tuple:
+    """Run nmcli command and return (success, stdout, stderr)."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['nmcli'] + args,
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        return result.returncode == 0, result.stdout.strip(), result.stderr.strip()
+    except FileNotFoundError:
+        return False, '', 'nmcli not found. NetworkManager may not be installed.'
+    except subprocess.TimeoutExpired:
+        return False, '', 'Command timed out'
+    except Exception as e:
+        return False, '', str(e)
+
+
+@app.route('/api/thin/network/status', methods=['GET'])
+def thin_network_status():
+    """Get current network status: connection type, IP, WiFi SSID if connected."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+
+    if platform.system() != 'Linux':
+        return jsonify({'error': 'Network settings only available on Linux/Pi'}), 400
+
+    status = {
+        'connection_type': 'unknown',
+        'ethernet_connected': False,
+        'wifi_connected': False,
+        'wifi_ssid': '',
+        'ip_addresses': [],
+        'hostname': socket.gethostname(),
+    }
+
+    # Check ethernet (eth0)
+    ok, out, _ = _run_nmcli(['-t', '-f', 'DEVICE,STATE', 'device'])
+    if ok:
+        for line in out.split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 2:
+                dev, state = parts[0], parts[1]
+                if dev.startswith('eth') and state == 'connected':
+                    status['ethernet_connected'] = True
+                if dev.startswith('wlan') and state == 'connected':
+                    status['wifi_connected'] = True
+
+    # Get WiFi SSID if connected
+    if status['wifi_connected']:
+        ok, out, _ = _run_nmcli(['-t', '-f', 'ACTIVE,SSID', 'device', 'wifi', 'list'])
+        if ok:
+            for line in out.split('\n'):
+                parts = line.split(':')
+                if len(parts) >= 2 and parts[0] == 'yes':
+                    status['wifi_ssid'] = parts[1]
+                    break
+
+    # Get IP addresses
+    ok, out, _ = _run_nmcli(['-t', '-f', 'DEVICE,IP4.ADDRESS', 'device', 'show'])
+    if ok:
+        current_dev = ''
+        for line in out.split('\n'):
+            if line.startswith('DEVICE:'):
+                current_dev = line.split(':', 1)[1] if ':' in line else ''
+            elif line.startswith('IP4.ADDRESS'):
+                ip = line.split(':', 1)[1].strip() if ':' in line else ''
+                if ip and current_dev and not current_dev.startswith('lo'):
+                    # Strip CIDR notation for display
+                    ip_clean = ip.split('/')[0] if '/' in ip else ip
+                    status['ip_addresses'].append({'device': current_dev, 'ip': ip_clean})
+
+    # Determine primary connection type
+    if status['ethernet_connected']:
+        status['connection_type'] = 'ethernet'
+    elif status['wifi_connected']:
+        status['connection_type'] = 'wifi'
+    else:
+        status['connection_type'] = 'disconnected'
+
+    return jsonify(status), 200
+
+
+@app.route('/api/thin/network/wifi/scan', methods=['GET'])
+def thin_wifi_scan():
+    """Scan for available WiFi networks."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+
+    if platform.system() != 'Linux':
+        return jsonify({'error': 'Network settings only available on Linux/Pi'}), 400
+
+    # Trigger a fresh scan first
+    _run_nmcli(['device', 'wifi', 'rescan'], timeout=10)
+    import time
+    time.sleep(2)  # Wait for scan to complete
+
+    ok, out, err = _run_nmcli(['-t', '-f', 'SSID,SIGNAL,SECURITY,IN-USE', 'device', 'wifi', 'list'])
+    if not ok:
+        return jsonify({'error': err or 'Failed to scan WiFi networks', 'networks': []}), 500
+
+    networks = []
+    seen = set()
+    for line in out.split('\n'):
+        parts = line.split(':')
+        if len(parts) >= 3:
+            ssid = parts[0].strip()
+            if not ssid or ssid in seen:
+                continue
+            seen.add(ssid)
+            signal = int(parts[1]) if parts[1].isdigit() else 0
+            security = parts[2] if len(parts) > 2 else ''
+            in_use = parts[3] == '*' if len(parts) > 3 else False
+            networks.append({
+                'ssid': ssid,
+                'signal': signal,
+                'security': security,
+                'connected': in_use
+            })
+
+    # Sort by signal strength (strongest first)
+    networks.sort(key=lambda x: x['signal'], reverse=True)
+    return jsonify({'networks': networks}), 200
+
+
+@app.route('/api/thin/network/wifi/connect', methods=['POST'])
+def thin_wifi_connect():
+    """Connect to a WiFi network."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+
+    if platform.system() != 'Linux':
+        return jsonify({'error': 'Network settings only available on Linux/Pi'}), 400
+
+    data = request.get_json(silent=True) or {}
+    ssid = (data.get('ssid') or '').strip()
+    password = (data.get('password') or '').strip()
+
+    if not ssid:
+        return jsonify({'error': 'SSID is required'}), 400
+
+    # Try to connect (nmcli handles WPA/WPA2 automatically)
+    args = ['device', 'wifi', 'connect', ssid]
+    if password:
+        args += ['password', password]
+
+    ok, out, err = _run_nmcli(args, timeout=30)
+    if not ok:
+        # Check for common errors
+        if 'Secrets were required' in err or 'password' in err.lower():
+            return jsonify({'error': 'Incorrect password or password required'}), 400
+        return jsonify({'error': err or 'Failed to connect to WiFi'}), 400
+
+    return jsonify({'success': True, 'message': f'Connected to {ssid}'}), 200
+
+
+@app.route('/api/thin/network/wifi/disconnect', methods=['POST'])
+def thin_wifi_disconnect():
+    """Disconnect from current WiFi (useful before switching to ethernet-only)."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+
+    if platform.system() != 'Linux':
+        return jsonify({'error': 'Network settings only available on Linux/Pi'}), 400
+
+    # Find the wlan device
+    ok, out, _ = _run_nmcli(['-t', '-f', 'DEVICE,TYPE,STATE', 'device'])
+    wlan_device = None
+    if ok:
+        for line in out.split('\n'):
+            parts = line.split(':')
+            if len(parts) >= 2 and parts[1] == 'wifi':
+                wlan_device = parts[0]
+                break
+
+    if not wlan_device:
+        return jsonify({'error': 'No WiFi device found'}), 400
+
+    ok, out, err = _run_nmcli(['device', 'disconnect', wlan_device])
+    if not ok:
+        return jsonify({'error': err or 'Failed to disconnect WiFi'}), 400
+
+    return jsonify({'success': True, 'message': 'WiFi disconnected'}), 200
+
+
+@app.route('/api/thin/network/wifi/forget', methods=['POST'])
+def thin_wifi_forget():
+    """Forget a saved WiFi network."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+
+    if platform.system() != 'Linux':
+        return jsonify({'error': 'Network settings only available on Linux/Pi'}), 400
+
+    data = request.get_json(silent=True) or {}
+    ssid = (data.get('ssid') or '').strip()
+
+    if not ssid:
+        return jsonify({'error': 'SSID is required'}), 400
+
+    ok, out, err = _run_nmcli(['connection', 'delete', ssid])
+    if not ok:
+        # Not an error if the connection wasn't saved
+        if 'not found' in err.lower():
+            return jsonify({'success': True, 'message': f'{ssid} was not saved'}), 200
+        return jsonify({'error': err or 'Failed to forget network'}), 400
+
+    return jsonify({'success': True, 'message': f'Forgot {ssid}'}), 200
+
+
+@app.route('/api/thin/network/saved', methods=['GET'])
+def thin_network_saved():
+    """List saved network connections."""
+    if _auth_enabled() and _current_role(session) != 'admin':
+        return jsonify({'error': 'Not authorized. Admin password required.', 'required_role': 'admin'}), 403
+
+    if platform.system() != 'Linux':
+        return jsonify({'error': 'Network settings only available on Linux/Pi'}), 400
+
+    ok, out, err = _run_nmcli(['-t', '-f', 'NAME,TYPE,ACTIVE', 'connection', 'show'])
+    if not ok:
+        return jsonify({'error': err or 'Failed to list connections', 'connections': []}), 500
+
+    connections = []
+    for line in out.split('\n'):
+        parts = line.split(':')
+        if len(parts) >= 3:
+            name = parts[0]
+            conn_type = parts[1]
+            active = parts[2] == 'yes'
+            # Skip loopback and docker networks
+            if conn_type in ('loopback', 'bridge', 'docker'):
+                continue
+            connections.append({
+                'name': name,
+                'type': conn_type,
+                'active': active
+            })
+
+    return jsonify({'connections': connections}), 200
+
+
 @app.route('/api/admin/password/check', methods=['POST'])
 def admin_check_password_proxy():
     """Admin-only login.
@@ -3087,10 +3332,14 @@ def tooling_catalog_proxy():
     return _proxy_api_5007('/api/tooling/catalog', method='POST', json_body=(request.get_json(silent=True) or {}))
 
 
-@app.route('/api/tooling/layout/<machine>', methods=['GET', 'POST'])
+@app.route('/api/tooling/layout/<machine>', methods=['GET', 'POST', 'DELETE'])
 def tooling_layout_proxy(machine: str):
     if request.method == 'GET':
         return _proxy_api_5007(f'/api/tooling/layout/{machine}', method='GET', params=request.args)
+    if request.method == 'DELETE':
+        if _auth_enabled() and _current_role(session) == 'viewer':
+            return jsonify({'error': 'Not authorized to delete. Enter a password at /login.', 'required_role': 'shop'}), 403
+        return _proxy_api_5007(f'/api/tooling/layout/{machine}', method='DELETE')
     if _auth_enabled() and _current_role(session) == 'viewer':
         return jsonify({'error': 'Not authorized to save. Enter a password at /login.', 'required_role': 'shop'}), 403
     return _proxy_api_5007(f'/api/tooling/layout/{machine}', method='POST', json_body=(request.get_json(silent=True) or {}))
